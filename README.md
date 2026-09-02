@@ -1,4 +1,4 @@
-# nam_chatbot
+# Chien_chatbot
 
 Chatbot AI tra loi khi duoc mention trong nhom Zalo va Messenger, co RAG va memory.
 
