@@ -1,0 +1,38 @@
+{
+  "name": "nam-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:cli": "tsx watch src/main/cli.ts",
+    "dev:api": "tsx watch src/main/api.ts",
+    "dev:worker": "tsx watch src/main/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start:api": "node dist/main/api.js",
+    "start:worker": "node dist/main/worker.js",
+    "test": "vitest run test/unit test/contract",
+    "test:int": "vitest run test/integration test/security",
+    "lint:deps": "depcruise src --config .dependency-cruiser.cjs",
+    "migrate": "tsx src/main/cli.ts migrate",
+    "eval": "tsx evals/runner.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "bullmq": "^5.0.0",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "pg": "^8.11.0",
+    "pino": "^9.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "dependency-cruiser": "^16.0.0",
+    "pino-pretty": "^11.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
