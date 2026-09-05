@@ -49,8 +49,13 @@ function makeDeps(over: Partial<Deps> = {}) {
         text: 'Deadline la ngay 30/11.',
         toolCalls: [],
         usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        finishReason: 'stop' as const,
       })),
       cheap: vi.fn(async () => ''),
+    },
+    tools: {
+      specs: () => [],
+      callMany: vi.fn(async () => []),
     },
     memory: {
       append: vi.fn(async (_s, m) => {
@@ -80,6 +85,7 @@ function makeDeps(over: Partial<Deps> = {}) {
     accessRules: { groupPolicy: 'open', dmPolicy: 'open', allowedThreads: new Set() },
     botName: BOT,
     reply: { maxTokens: 16_000, effort: 'low' },
+    react: { maxIterations: 5, maxToolCalls: 8, deadlineMs: 60_000 },
     recentLimit: 15,
     ...over,
   };

@@ -21,7 +21,8 @@
     "migrate": "tsx --env-file-if-exists=.env src/main/cli.ts migrate",
     "eval": "tsx evals/runner.ts",
     "dev:web": "vite --config web/vite.config.ts web",
-    "build:web": "vite build --config web/vite.config.ts web"
+    "build:web": "vite build --config web/vite.config.ts web",
+    "typecheck:web": "tsc -p web/tsconfig.json"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",

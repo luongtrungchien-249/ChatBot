@@ -1,4 +1,5 @@
-import { webChannel } from '../adapters/web/send.js';
+import { publishProgress, webChannel } from '../adapters/web/send.js';
+import type { ReactEvent } from '../agents/pipeline/stages/12-generate.js';
 import type { InboundMessage } from '../agents/domain/message.js';
 import { isRetryable } from '../agents/domain/errors.js';
 import { handleMessage } from '../agents/pipeline/handle-message.js';
@@ -43,7 +44,17 @@ const worker = createReplyWorker(async (job) => {
     return;
   }
 
-  const result = await handleMessage(msg, { ...container, channel });
+  // Chi kenh web hien duoc tien do. Zalo/Messenger khong co cho de ve, nen bo qua.
+  const onReactEvent =
+    msg.platform === 'web'
+      ? (event: ReactEvent): void => publishProgress(msg.threadId, event)
+      : undefined;
+
+  const result = await handleMessage(msg, {
+    ...container,
+    channel,
+    ...(onReactEvent ? { onReactEvent } : {}),
+  });
 
   if (result.ok) {
     if (result.replied) await markReplied(msg.platform, msg.messageId);

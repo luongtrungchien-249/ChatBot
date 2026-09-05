@@ -1,5 +1,6 @@
 import type { ThreadScope } from '../../agents/domain/thread.js';
 import type { ChannelPort } from '../../agents/ports/channel.port.js';
+import { logger } from '../../infra/logger.js';
 import { redis } from '../../infra/redis.js';
 import { WEB_MAX_MESSAGE_CHARS, webChannelKey, type WebEvent } from './normalize.js';
 
@@ -11,6 +12,21 @@ import { WEB_MAX_MESSAGE_CHARS, webChannelKey, type WebEvent } from './normalize
  */
 async function publish(threadId: string, event: WebEvent): Promise<void> {
   await redis.publish(webChannelKey(threadId), JSON.stringify(event));
+}
+
+/**
+ * Day su kien tien do (ReAct) xuong UI.
+ *
+ * KHONG await o cho goi: bao tien do khong duoc chan duong tra loi. Loi o day chi
+ * lam mat mot dong hien thi, khong duoc lam hong ca luot.
+ */
+export function publishProgress(threadId: string, event: WebEvent): void {
+  void publish(threadId, event).catch((err: unknown) => {
+    logger.warn(
+      { threadId, err: err instanceof Error ? err.message : String(err) },
+      'khong day duoc su kien tien do',
+    );
+  });
 }
 
 export const webChannel: ChannelPort = {

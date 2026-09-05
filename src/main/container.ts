@@ -9,6 +9,7 @@ import { rateLimit } from '../infra/ratelimit.js';
 import { llm } from '../llm/openai.client.js';
 import { MODELS } from '../llm/models.js';
 import { messageRepo } from '../memory/repository/message.repo.js';
+import { toolPort } from '../tools/index.js';
 
 /**
  * Dependency injection thu cong. Mot ham tra ve object — nhin la biet cai gi noi
@@ -41,16 +42,28 @@ export async function buildContainer(): Promise<Container> {
   // dung nghia hop dong cua port, nen tuan 1 khong can nhanh dac biet nao.
   const knowledge: KnowledgePort = { search: async () => [] };
 
+  const specs = toolPort.specs();
+  logger.info(
+    { tools: specs.map((s) => s.name) },
+    specs.length === 0 ? 'khong co cong cu nao duoc bat' : 'cong cu da san sang',
+  );
+
   return {
     llm,
     memory,
     knowledge,
+    tools: toolPort,
     rateLimit,
     clock: { now: () => new Date() },
     logger,
     accessRules,
     botName: config.BOT_MENTION_NAME,
     reply: { maxTokens: MODELS.reply.maxTokens, effort: MODELS.reply.effort },
+    react: {
+      maxIterations: config.REACT_MAX_ITERATIONS,
+      maxToolCalls: config.REACT_MAX_TOOL_CALLS,
+      deadlineMs: config.REACT_DEADLINE_MS,
+    },
     recentLimit: RECENT_LIMIT,
   };
 }

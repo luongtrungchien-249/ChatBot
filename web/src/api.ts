@@ -9,8 +9,14 @@ export type Message = { text: string; fromBot: boolean; at: string };
 
 export type WebEvent =
   | { type: 'typing' }
+  | { type: 'thought'; iteration: number; text: string }
+  | { type: 'tool_call'; iteration: number; tools: readonly string[] }
+  | { type: 'observation'; iteration: number; tool: string; ok: boolean; latencyMs: number }
   | { type: 'final'; text: string }
   | { type: 'error'; text: string };
+
+/** Mot buoc trong vong ReAct, de hien duoi khung chat. */
+export type ReactStep = { kind: 'thought' | 'tool_call' | 'observation'; text: string; ok: boolean };
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);

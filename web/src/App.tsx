@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, openStream, type Message, type ThreadSummary } from './api.js';
+// React 19 bo namespace JSX toan cuc — phai import tu 'react'.
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { api, openStream, type Message, type ReactStep, type ThreadSummary } from './api.js';
 
 const newThreadId = (): string => `web-${crypto.randomUUID()}`;
 
@@ -9,6 +10,7 @@ export function App(): JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
+  const [steps, setSteps] = useState<ReactStep[]>([]);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -30,13 +32,44 @@ export function App(): JSX.Element {
   // worker la process khac, va POST phai tra 202 ngay.
   useEffect(() => {
     return openStream(threadId, (event) => {
-      if (event.type === 'final') {
-        setMessages((prev) => [...prev, { text: event.text, fromBot: true, at: new Date().toISOString() }]);
-        setWaiting(false);
-        refreshThreads();
-      } else if (event.type === 'error') {
-        setError(event.text);
-        setWaiting(false);
+      switch (event.type) {
+        case 'thought':
+          setSteps((prev) => [...prev, { kind: 'thought', text: event.text, ok: true }]);
+          break;
+        case 'tool_call':
+          setSteps((prev) => [
+            ...prev,
+            { kind: 'tool_call', text: `Đang tra cứu: ${event.tools.join(', ')}`, ok: true },
+          ]);
+          break;
+        case 'observation':
+          setSteps((prev) => [
+            ...prev,
+            {
+              kind: 'observation',
+              text: event.ok
+                ? `${event.tool} xong (${(event.latencyMs / 1000).toFixed(1)}s)`
+                : `${event.tool} lỗi`,
+              ok: event.ok,
+            },
+          ]);
+          break;
+        case 'final':
+          setMessages((prev) => [
+            ...prev,
+            { text: event.text, fromBot: true, at: new Date().toISOString() },
+          ]);
+          setSteps([]);
+          setWaiting(false);
+          refreshThreads();
+          break;
+        case 'error':
+          setError(event.text);
+          setSteps([]);
+          setWaiting(false);
+          break;
+        default:
+          break;
       }
     });
   }, [threadId, refreshThreads]);
@@ -52,6 +85,7 @@ export function App(): JSX.Element {
 
     setDraft('');
     setError(null);
+    setSteps([]);
     setMessages((prev) => [...prev, { text, fromBot: false, at: new Date().toISOString() }]);
     setWaiting(true);
 
@@ -101,7 +135,16 @@ export function App(): JSX.Element {
                 {m.text}
               </div>
             ))}
-            {waiting && <div className="msg bot thinking">Đang trả lời…</div>}
+            {steps.length > 0 && (
+              <div className="steps">
+                {steps.map((s, i) => (
+                  <div key={i} className={`step ${s.kind}${s.ok ? '' : ' failed'}`}>
+                    {s.text}
+                  </div>
+                ))}
+              </div>
+            )}
+            {waiting && steps.length === 0 && <div className="msg bot thinking">Đang trả lời…</div>}
             <div ref={bottomRef} />
           </div>
         )}

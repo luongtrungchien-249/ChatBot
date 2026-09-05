@@ -14,7 +14,13 @@ import { BUDGET_EXCEEDED_TEXT, checkBudget } from './stages/05-budget-guard.js';
 import { persistInbound, persistOutbound } from './stages/06-persist.js';
 import { startTyping } from './stages/07-typing.js';
 import { buildPrompt } from './stages/11-build-prompt.js';
-import { CONFIG_ERROR_TEXT, FALLBACK_TEXT, generate } from './stages/12-generate.js';
+import {
+  CONFIG_ERROR_TEXT,
+  FALLBACK_TEXT,
+  generate,
+  type ReactEvent,
+} from './stages/12-generate.js';
+import type { ToolPort } from '../ports/tool.port.js';
 import { respond } from './stages/13-respond.js';
 
 /**
@@ -43,10 +49,15 @@ export interface Deps {
   logger: LoggerPort;
   accessRules: AccessRules;
   botName: string;
+  tools: ToolPort;
   /** Tu llm/models.ts — agents/ khong duoc import llm/ nen container tiem vao. */
   reply: { maxTokens: number; effort: 'low' | 'medium' | 'high' };
+  /** Chan cung cua vong ReAct. Xem stage 12. */
+  react: { maxIterations: number; maxToolCalls: number; deadlineMs: number };
   /** So tin gan nhat lay lam L1. Section 6.1 chot 15. */
   recentLimit: number;
+  /** Bao tien do ReAct ra kenh (web SSE hien duoc bot dang lam gi). Khong bat buoc. */
+  onReactEvent?: (event: ReactEvent) => void;
 }
 
 export async function handleMessage(msg: InboundMessage, deps: Deps): Promise<HandleResult> {
@@ -85,9 +96,9 @@ export async function handleMessage(msg: InboundMessage, deps: Deps): Promise<Ha
   //  7. typing — khong await.
   startTyping(deps.channel, scope, log);
 
-  //  8. rewrite  TODO(tuan-4): cau hoi thieu ngu canh -> viet lai bang model re.
-  //  9. retrieve TODO(tuan-4): tro thanh tool search_knowledge_base trong vong ReAct.
-  // 10. recall   TODO(tuan-5): L2 summary + L3 facts (luon kem ThreadScope).
+  //  8. rewrite  TODO(giai-doan-6): cau hoi thieu ngu canh -> viet lai bang model re.
+  //  9. retrieve Da thanh cong cu trong vong ReAct o stage 12, khong con pre-fetch.
+  // 10. recall   TODO(giai-doan-7): L2 summary + L3 facts (luon kem ThreadScope).
 
   // L1 thi da co tu tuan 1. Postgres la nguon that, cache Redis chi la he qua.
   const recent = await deps.memory.recent(scope, deps.recentLimit);
@@ -105,9 +116,19 @@ export async function handleMessage(msg: InboundMessage, deps: Deps): Promise<Ha
     log,
   );
 
-  // 12. generate — giai doan 2 thay cho nay bang vong ReAct.
+  // 12. generate — vong ReAct: Thought -> Action -> Observation -> lap.
   const result = await generate(
-    { llm: deps.llm, maxTokens: deps.reply.maxTokens, effort: deps.reply.effort },
+    {
+      llm: deps.llm,
+      tools: deps.tools,
+      rateLimit: deps.rateLimit,
+      maxTokens: deps.reply.maxTokens,
+      effort: deps.reply.effort,
+      maxIterations: deps.react.maxIterations,
+      maxToolCalls: deps.react.maxToolCalls,
+      deadlineMs: deps.react.deadlineMs,
+      ...(deps.onReactEvent ? { onEvent: deps.onReactEvent } : {}),
+    },
     prompt,
     ctx,
     log,
