@@ -8,7 +8,7 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
-  ANTHROPIC_API_KEY: z.string().min(1),
+  OPENAI_API_KEY: z.string().min(1),
 
   EMBEDDING_PROVIDER: z.string().min(1),
   EMBEDDING_API_KEY: z.string().min(1),
@@ -35,6 +35,12 @@ export const envSchema = z.object({
   DM_POLICY: z.enum(['pairing', 'allowlist', 'open', 'disabled']),
   RL_USER_PER_MIN: z.coerce.number().int().positive(),
   RL_THREAD_PER_MIN: z.coerce.number().int().positive(),
+
+  // --- Giao dien web ---
+  WEB_PORT: z.coerce.number().int().positive().default(3000),
+  // Chi localhost. Mo ra 0.0.0.0 khi CHUA co auth nghia la ai trong mang cung dot
+  // duoc ngan sach cua ban.
+  WEB_BIND: z.string().min(1).default('127.0.0.1'),
 
   // Khong co mac dinh, co chu y. Xem ARCHITECTURE.md section 8.3.
   DAILY_BUDGET_USD: z.coerce.number().positive(),

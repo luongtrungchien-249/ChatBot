@@ -28,7 +28,10 @@ CREATE TABLE thread_allowlist (
 );
 
 -- Bang theo doi migration da chay (dung boi src/main/cli.ts migrate).
-CREATE TABLE schema_migration (
+-- IF NOT EXISTS la BAT BUOC: runner phai tu tao bang nay TRUOC khi chay 0001,
+-- neu khong thi khong co cho ghi lai la da chay den dau. Den luot 0005 chay thi
+-- bang da ton tai roi.
+CREATE TABLE IF NOT EXISTS schema_migration (
   filename   TEXT PRIMARY KEY,
   applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

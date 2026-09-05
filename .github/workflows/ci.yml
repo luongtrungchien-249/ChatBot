@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # L1-L7: 8 luat kien truc trong ARCHITECTURE.md section 1.
+      # Cuong che bang may, khong bang niem tin.
+      - name: Luat kien truc
+        run: npm run lint:deps
+
+      # L4: khong SQL nao cham memory_fact ngoai memory/repository/.
+      # dependency-cruiser khong doc duoc chuoi SQL — day la lop con thieu.
+      - name: Guard memory_fact
+        run: npm run guard:sql
+
+      - name: Unit + contract test
+        run: npm test

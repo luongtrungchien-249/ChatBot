@@ -4,7 +4,7 @@
  * Khong bao gio truyen platform + threadId roi rac. Truyen mot object.
  * Ly do: khong ai quen tham so thu hai cua mot object ca.
  */
-export type Platform = 'zalo_bot' | 'zalo_personal' | 'messenger' | 'cli';
+export type Platform = 'zalo_bot' | 'zalo_personal' | 'messenger' | 'cli' | 'web';
 
 export type ThreadScope = Readonly<{
   platform: Platform;
