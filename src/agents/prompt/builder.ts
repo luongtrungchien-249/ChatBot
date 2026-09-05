@@ -10,9 +10,15 @@ import { trimToBudget } from './budget.js';
  * Vi tri: system -> L4 -> L3 -> L2 -> L1 -> cau hoi.
  */
 
-/** Chan chunk tu thoat khoi hop bang cach viet the dong cua chinh no. */
-function sanitize(content: string): string {
-  return content.replace(/<\/?tai_lieu[^>]*>/gi, '');
+/**
+ * Chan noi dung tu thoat khoi hop bang cach viet the dong cua chinh no.
+ *
+ * Khong lam buoc nay thi mot tai lieu chua `</tai_lieu>` se tu thoat ra khoi hop —
+ * va do chinh xac la cach nguoi ta pha. Ap cho CA ket qua cong cu (tools/guard.ts),
+ * noi rui ro cao hon nhieu vi van ban do nguoi la soan.
+ */
+export function sanitize(content: string): string {
+  return content.replace(/<\/?(tai_lieu|ket_qua_cong_cu|ghi_nho)[^>]*>/gi, '');
 }
 
 export function renderKnowledge(chunks: readonly RetrievedChunk[]): string {

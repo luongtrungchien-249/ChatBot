@@ -22,26 +22,43 @@ import { truncateAtBoundary } from '../../shared/chunk-text.js';
  * chu khong phai gui nhieu.
  */
 export const TOKEN_BUDGET = {
-  /** Hang so ta tu viet, ~620 token. Cap that su, khong phai cau dao. */
-  system: 700,
+  /**
+   * Hang so ta tu viet nen day la cap THAT SU, khong phai cau dao.
+   *
+   * Nang 700 -> 2600 khi system prompt duoc viet lai theo 5 khoi ROLE / CAPABILITY /
+   * RULES / CONSTRAINTS / OUTPUT FORMAT cong phan few-shot.
+   *
+   * Do that hien tai: 1470 token (do bang ops/calibrate-tokens.mjs). Van DUOI nguong
+   * 2048 cua gpt-5-mini nen prompt caching VAN CHUA an — cache_read_tokens con bang 0.
+   * KHONG keo dai prompt chi de vuot nguong: o gia $0,25/1M input, cache tiet kiem
+   * duoc khoang $0,0003 moi cau, khong dang de lam prompt te di.
+   */
+  system: 2_600,
   knowledge: 20_000,
   facts: 4_000,
   summary: 4_000,
   recent: 20_000,
   question: 8_000,
+  /** Ket qua mot lan goi cong cu. Mot trang web dai khong duoc nuot ca cua so. */
+  tool: 12_000,
 } as const;
 
 /**
- * So ky tu tren mot token, dung de uoc luong.
+ * So ky tu tren mot token.
  *
- * 3 chu khong phai 4: tieng Viet co dau tokenize ton hon tieng Anh (~2,5-3 ky tu/token).
- * Uoc luong THAP la an toan — tha cat som con hon tran cap.
- * Do lai bang: node ops/calibrate-tokens.mjs
+ * 3,40 la SO DO DUOC, khong phai so doan: chay ops/calibrate-tokens.mjs tren mau
+ * tieng Viet that (hoi thoai nhom, van ban hanh chinh, cau hoi ky thuat) voi
+ * gpt-5-mini, ngay 06/09/2026 — ket qua 3,23 / 3,26 / 3,78, trung binh 3,40.
+ *
+ * Truoc do dat 3 theo phong doan va no uoc luong DU 13%: SYSTEM_PROMPT 4991 ky tu
+ * ra 1664 token uoc luong nhung chi 1470 token that.
+ *
+ * Do lai khi doi model — moi model mot tokenizer.
  *
  * Khong dem token that o day: agents/ khong duoc import llm/ (L1), va them mot lan
  * goi mang cho moi tang moi cau tra loi thi hong muc tieu p95 < 5s.
  */
-export const CHARS_PER_TOKEN = 3;
+export const CHARS_PER_TOKEN = 3.4;
 
 export type BudgetLayer = keyof typeof TOKEN_BUDGET;
 

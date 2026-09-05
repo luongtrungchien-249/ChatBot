@@ -8,6 +8,7 @@ Chatbot AI tra loi khi duoc mention trong nhom Zalo va Messenger, co RAG va memo
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **Doc truoc.** Code nam o dau, ai duoc goi ai, schema DB, chi phi. |
 | [docs/master-plan-chatbot.md](docs/master-plan-chatbot.md) | Lo trinh: lam gi, tuan nao. |
+| [docs/plan-thi-cong.md](docs/plan-thi-cong.md) | **Plan end-to-end.** Luong du lieu, 8 giai doan, cach kiem chung, rui ro. |
 | [docs/dep-rules-verified.md](docs/dep-rules-verified.md) | Bang chung 7 luat kien truc thuc su bat duoc vi pham. |
 | [docs/archive/](docs/archive/) | Ban ke hoach cu, giu de tra cuu. Da bi ARCHITECTURE.md thay the. |
 

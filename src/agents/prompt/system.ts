@@ -20,6 +20,13 @@
  * buoc "duoi 4-5 cau, khong markdown". Don bay dung cho do sau suy luan la
  * `reasoning_effort` trong llm/models.ts. Trong CONSTRAINTS chi co mot dong
  * "suy nghi ky, chi viet ra ket luan".
+ *
+ * Do dai: 4991 ky tu = 1470 token THAT (do ngay 06/09/2026 bang
+ * ops/calibrate-tokens.mjs). Cap la TOKEN_BUDGET.system = 2600.
+ *
+ * Van duoi nguong 2048 token cua gpt-5-mini nen prompt caching CHUA an. Do la lua
+ * chon co y: keo dai prompt chi de vuot nguong chi tiet kiem duoc khoang $0,0003
+ * moi cau, khong dang de lam prompt te di.
  */
 export const SYSTEM_PROMPT = `# ROLE
 

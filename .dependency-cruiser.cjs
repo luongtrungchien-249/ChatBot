@@ -6,10 +6,12 @@ module.exports = {
   forbidden: [
     {
       name: 'agents-khong-biet-ha-tang',
-      comment: 'L1: agents/ khong duoc import adapters, infra, llm, memory, knowledge.',
+      comment:
+        'L1: agents/ khong duoc import adapters, infra, llm, memory, knowledge, tools. ' +
+        'tools/ goi mang ra ngoai nen la ha tang — agents chi duoc thay no qua ToolPort.',
       severity: 'error',
       from: { path: '^src/agents' },
-      to: { path: '^src/(adapters|infra|llm|memory|knowledge)' },
+      to: { path: '^src/(adapters|infra|llm|memory|knowledge|tools)' },
     },
     {
       name: 'agents-khong-doc-env',

@@ -1,7 +1,28 @@
 import type { ThreadScope } from '../domain/thread.js';
 
-export type LlmRole = 'user' | 'assistant';
-export type LlmMessage = Readonly<{ role: LlmRole; content: string }>;
+/**
+ * Mot lan model muon goi cong cu.
+ *
+ * `id` la BAT BUOC: OpenAI doi moi ket qua tra ve phai khop `tool_call_id` cua
+ * loi goi tuong ung. Thieu mot cai la ca request 400.
+ */
+export type ToolCall = Readonly<{
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}>;
+
+/**
+ * Mot luot trong hoi thoai gui len model.
+ *
+ * Union chu khong phai { role, content } phang: luot assistant co the KHONG co van
+ * ban ma chi co loi goi tool, va luot tool phai mang theo toolCallId. Kieu phang
+ * khong bieu dien duoc vong ReAct.
+ */
+export type LlmMessage =
+  | Readonly<{ role: 'user'; content: string }>
+  | Readonly<{ role: 'assistant'; content: string; toolCalls?: readonly ToolCall[] }>
+  | Readonly<{ role: 'tool'; toolCallId: string; content: string }>;
 
 export type ToolSpec = Readonly<{
   name: string;
@@ -24,8 +45,10 @@ export type LlmUsage = Readonly<{
 
 export type LlmResult = Readonly<{
   text: string;
-  toolCalls: readonly { name: string; input: Record<string, unknown> }[];
+  toolCalls: readonly ToolCall[];
   usage: LlmUsage;
+  /** 'tool_calls' = model muon goi cong cu roi hoi tiep; 'stop' = da xong. */
+  finishReason: 'stop' | 'tool_calls' | 'length' | 'other';
 }>;
 
 /**

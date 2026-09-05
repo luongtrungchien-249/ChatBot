@@ -1,5 +1,12 @@
 import OpenAI from 'openai';
-import type { LlmPort, LlmResult, LlmUsage, ToolSpec } from '../agents/ports/llm.port.js';
+import type {
+  LlmMessage,
+  LlmPort,
+  LlmResult,
+  LlmUsage,
+  ToolCall,
+  ToolSpec,
+} from '../agents/ports/llm.port.js';
 import { config } from '../config/index.js';
 import { logger } from '../infra/logger.js';
 import { record } from './cost-meter.js';
@@ -49,18 +56,64 @@ function toOpenAiTools(tools: readonly ToolSpec[]): OpenAI.Chat.ChatCompletionTo
 function parseToolCalls(
   message: OpenAI.Chat.ChatCompletionMessage,
   traceId: string,
-): LlmResult['toolCalls'] {
-  const out: { name: string; input: Record<string, unknown> }[] = [];
+): readonly ToolCall[] {
+  const out: ToolCall[] = [];
   for (const call of message.tool_calls ?? []) {
     if (call.type !== 'function') continue;
+
+    // arguments hong van phai tra ve loi goi, KHONG duoc bo qua: moi tool_call
+    // deu can mot tool_result khop id, thieu mot cai la ca request sau 400.
+    let input: Record<string, unknown> = {};
     try {
       // Luon JSON.parse, khong bao gio so khop chuoi tho tren arguments.
-      out.push({ name: call.function.name, input: JSON.parse(call.function.arguments) });
+      input = JSON.parse(call.function.arguments) as Record<string, unknown>;
     } catch {
-      logger.error({ traceId, tool: call.function.name }, 'arguments cua tool khong phai JSON hop le');
+      logger.error(
+        { traceId, tool: call.function.name },
+        'arguments cua tool khong phai JSON hop le — goi voi input rong',
+      );
     }
+    out.push({ id: call.id, name: call.function.name, input });
   }
   return out;
+}
+
+/** Chuyen hop dong LlmMessage sang dang OpenAI. Union nen phai map tung nhanh. */
+function toOpenAiMessages(
+  system: string,
+  messages: readonly LlmMessage[],
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  const out: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    // system dat dau va la HANG SO -> prompt caching bat duoc tien to nay.
+    { role: 'system', content: system },
+  ];
+
+  for (const m of messages) {
+    if (m.role === 'user') {
+      out.push({ role: 'user', content: m.content });
+    } else if (m.role === 'tool') {
+      out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
+    } else if (m.toolCalls && m.toolCalls.length > 0) {
+      out.push({
+        role: 'assistant',
+        content: m.content === '' ? null : m.content,
+        tool_calls: m.toolCalls.map((c) => ({
+          id: c.id,
+          type: 'function' as const,
+          function: { name: c.name, arguments: JSON.stringify(c.input) },
+        })),
+      });
+    } else {
+      out.push({ role: 'assistant', content: m.content });
+    }
+  }
+
+  return out;
+}
+
+function toFinishReason(reason: string | null | undefined): LlmResult['finishReason'] {
+  if (reason === 'stop' || reason === 'tool_calls' || reason === 'length') return reason;
+  return 'other';
 }
 
 /** Gom phan lap lai cua reply() va cheap(): do thoi gian, ghi cost du thanh hay bai. */
@@ -105,12 +158,16 @@ export const llm: LlmPort = {
           // va token reasoning an vao cap nay. Xem canh bao trong models.ts.
           max_completion_tokens: req.maxTokens,
           reasoning_effort: req.effort,
-          messages: [
-            // system dat dau va la HANG SO -> prompt caching bat duoc tien to nay.
-            { role: 'system', content: req.system },
-            ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          ...(req.tools ? { tools: toOpenAiTools(req.tools) } : {}),
+          messages: toOpenAiMessages(req.system, req.messages),
+          ...(req.tools && req.tools.length > 0
+            ? {
+                tools: toOpenAiTools(req.tools),
+                // Model tu quyet dinh goi hay khong. Ep goi (tool_choice: 'required')
+                // se lam no goi ca khi cau hoi khong can tra cuu gi.
+                tool_choice: 'auto' as const,
+                // Parallel tool calling la MAC DINH cua OpenAI. Khong tat.
+              }
+            : {}),
         },
         { timeout: REPLY_TIMEOUT_MS, maxRetries: 0 },
       );
@@ -120,6 +177,7 @@ export const llm: LlmPort = {
       if (!choice) throw new Error('OpenAI tra ve response khong co choice nao');
 
       const text = choice.message.content ?? '';
+      const toolCalls = parseToolCalls(choice.message, req.ctx.traceId);
 
       // Cap het truoc khi model kip viet cau tra loi: content rong, khong loi nao
       // duoc nem. Phai bat o day, neu khong bot se "im lang" mot cach bi an.
@@ -135,7 +193,7 @@ export const llm: LlmPort = {
       }
 
       return {
-        value: { text, toolCalls: parseToolCalls(choice.message, req.ctx.traceId), usage },
+        value: { text, toolCalls, usage, finishReason: toFinishReason(choice.finish_reason) },
         usage,
       };
     });

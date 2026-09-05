@@ -36,6 +36,17 @@ export const envSchema = z.object({
   RL_USER_PER_MIN: z.coerce.number().int().positive(),
   RL_THREAD_PER_MIN: z.coerce.number().int().positive(),
 
+  // --- Cong cu (giai doan 3) ---
+  // De TRONG thi cong cu tuong ung khong duoc khai trong ToolPort.specs(). Cho model
+  // thay mot cong cu roi de no goi that bai la cach nhanh nhat de no bia ket qua.
+  TAVILY_API_KEY: z.string().default(''),
+  SEMANTIC_SCHOLAR_API_KEY: z.string().default(''),
+
+  // Chan cung cua vong ReAct. Thieu cai nao cung thanh vong dot tien khong day.
+  REACT_MAX_ITERATIONS: z.coerce.number().int().positive().default(5),
+  REACT_MAX_TOOL_CALLS: z.coerce.number().int().positive().default(8),
+  REACT_DEADLINE_MS: z.coerce.number().int().positive().default(60_000),
+
   // --- Giao dien web ---
   WEB_PORT: z.coerce.number().int().positive().default(3000),
   // Chi localhost. Mo ra 0.0.0.0 khi CHUA co auth nghia la ai trong mang cung dot
