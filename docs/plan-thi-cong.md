@@ -582,10 +582,30 @@ Ngưỡng trùng lặp **không lấy điểm giữa khoảng an toàn** mà l�
 nhau: cao quá thì bảng có bản trùng (phiền, không mất gì); thấp quá thì fact mới **revoke** fact cũ —
 mất thông tin, và im lặng.
 
-### L3 implicit — CHƯA bật, có chủ đích
+### L3 implicit — đã viết, **mặc định TẮT**
 
-Điều kiện tiên quyết đã xong: `uv run python -m main.cli memory <platform> <thread_id>` in ra mọi fact
-còn hiệu lực của một thread. Không nhìn được bot đã tự ghi gì thì không thể cho phép nó tự ghi.
+`MEMORY_IMPLICIT_ENABLED=false`. Điều kiện tiên quyết đã xong trước khi viết:
+`uv run python -m main.cli memory <platform> <thread_id>` in ra mọi fact còn hiệu lực của một thread.
+Không nhìn được bot đã tự ghi gì thì không thể cho phép nó tự ghi.
+
+Chạy trên **cùng lô mà L2 vừa nén**, không có lịch riêng. Ba cái lợi: không cần thêm cột đánh dấu
+"đã trích chưa" (dùng luôn `summarized`), mỗi tin được xét đúng một lần, và nó chạy khi đoạn hội thoại
+đã "nguội" chứ không phải giữa chừng một câu chuyện.
+
+**Ba lớp chặn, mỗi lớp một loại sai:**
+
+1. **Loại câu trả lời của bot khỏi đầu vào.** Bot không phải nguồn sự thật về người dùng — nó đoán, nó
+   diễn giải. Trích fact từ chính đầu ra của model là cách nhanh nhất để một suy đoán thành "điều đã biết".
+2. **Tên không có trong lô thì bỏ qua dòng đó.** Model có thể nhắc một cái tên nó đọc được đâu đó trong
+   nội dung tin nhắn. Gán fact cho người không có mặt trong đoạn hội thoại vừa đọc là ghi bừa vào hồ sơ
+   của ai đó. Một fact bị bỏ sót còn hơn một fact gắn nhầm người.
+3. **`confidence >= 0.8`.** Model phải gần như chắc chắn, không phải "có vẻ đúng".
+
+Vẫn đi qua `fact_repo.remember` nên được chống trùng và phát hiện mâu thuẫn y hệt đường explicit — một
+fact bot tự trích không được phép đè lên fact người dùng tự nói ra mà bỏ qua bước đó.
+
+**Đã chạy thật:** tắt → 0 fact. Bật → 6 fact từ 6 tin, gán đúng người, và "trời hôm nay mưa to quá"
+bị loại đúng như instruction yêu cầu.
 
 ### 7 test bắt buộc — đã điền
 
@@ -669,10 +689,17 @@ Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ
 |---|---|---|---|
 | Unit | `tests/unit` — chỉ `agents/` | mọi commit | **Không I/O, < 2s.** Đây là lý do tồn tại của ports |
 | Contract | `tests/contract` — adapter ăn fixtures thật | mọi commit | Ghi payload thật một lần, dùng mãi |
-| Integration | `tests/integration` — testcontainers | mọi PR | Postgres+pgvector, Redis thật |
+| Integration | `tests/integration` — Postgres + Redis + embedding thật | mọi PR | Tự bỏ qua nếu không có, **có nêu lý do** |
+| Security | `tests/security` — rò rỉ cross-thread | mọi PR | **Không được phép xoá** |
 | Eval | `evals/` — 50 câu | khi đổi prompt/chunking/model | Ngưỡng ở §10 |
 
-Hiện có **179 unit test**. `tests/security/test_cross_thread_leak.py` là test **không được phép xoá**.
+**290 test**, cả bốn tầng đều có file. Ba tầng dưới cần Docker; chúng tự bỏ qua khi thiếu, nhưng
+**không bỏ qua im lặng** — dòng skip luôn nêu lý do.
+
+**Một bài học về hạ tầng test.** `tests/contract` chạy trên payload Zalo **thật đã ghi lại**, không phải
+payload tôi tự nghĩ ra. Khác biệt không nhỏ: unit test chạy trên payload tự nghĩ chỉ chứng minh code
+khớp với *hiểu biết của tôi* — và hiểu biết đó đã sai một lần, về trường mention. Fixture chép từ hệ
+thống thật thì khi Zalo đổi payload, **chỗ đó** đỏ.
 
 ```bash
 uv run mypy && uv run ruff check . && uv run lint-imports
