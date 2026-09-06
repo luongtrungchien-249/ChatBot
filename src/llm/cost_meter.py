@@ -56,6 +56,36 @@ class UsageRecord:
     ok: bool
 
 
+async def record_embedding(
+    *, model: str, tokens: int, cost_usd: float, latency_ms: int
+) -> None:
+    """Ghi mot lan goi EMBEDDING.
+
+    Duong rieng chu khong dung `record()`: embedding khong co output token, khong co
+    reasoning, khong co cache, va gia cua no khong nam trong MODELS (bang do khai
+    model sinh van ban). Nhoi no vao cung mot ham se bat MODELS mang mot loai model
+    khac han chi de dung chung mot cau INSERT.
+
+    KHONG co scope/sender: embedding duoc goi tu nhieu cho, ke ca job nen chay khong
+    do ai kich hoat. Ba cot do NOT NULL nen dien gia tri he thong.
+    """
+    try:
+        await execute(
+            """INSERT INTO usage_log
+                 (trace_id, platform, thread_id, sender_id, route, model,
+                  input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                  cost_usd, latency_ms, ok)
+               VALUES ('system','system','system','system','embed',$1,$2,0,0,0,$3,$4,TRUE)""",
+            model,
+            tokens,
+            cost_usd,
+            latency_ms,
+        )
+        await add_cost(cost_usd)
+    except Exception as error:
+        _log.error("khong ghi duoc usage_log cho embedding", err=str(error))
+
+
 async def record(entry: UsageRecord) -> float:
     """Ghi mot lan goi.
 
