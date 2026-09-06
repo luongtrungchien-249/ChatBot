@@ -28,7 +28,7 @@ Phần gọi model chỉ là vài chục dòng code. Giá trị kỹ thuật n�
 
 ```
 Zalo Bot API  ─┐
-Meta webhook  ─┼→ Adapter → Normalizer → Core Engine → Claude API
+Meta webhook  ─┼→ Adapter → Normalizer → Core Engine → OpenAI API
 Zalo Personal ─┘                            │
                                             ├─ L1 Working Memory  (Redis)
                                             ├─ L2 Episodic        (Postgres)
@@ -40,20 +40,21 @@ Zalo Personal ─┘                            │
 
 **Contract chung:**
 
-```ts
-interface InboundMessage {
-  platform: 'zalo_bot' | 'zalo_personal' | 'messenger';
-  thread_id: string;
-  sender_id: string;
-  sender_name: string;
-  text: string;
-  is_group: boolean;
-  mentioned_bot: boolean;
-  reply_to?: { id: string; text: string };
-  attachments: Attachment[];
-  message_id: string;
-  timestamp: number;
-}
+```python
+@dataclass(frozen=True, slots=True)
+class InboundMessage:
+    platform: Platform            # zalo_bot | zalo_personal | messenger | cli | web
+    thread_id: str
+    sender_id: str
+    sender_name: str
+    text: str
+    is_group: bool
+    mentioned_bot: bool
+    message_id: str
+    timestamp: int
+    trace_id: str                 # L8 — mot trace_id xuyen suot moi log
+    reply_to: ReplyTo | None = None
+    attachments: tuple[Attachment, ...] = ()
 ```
 
 Adapter lo: verify chữ ký, ack nhanh, đẩy vào queue, gửi trả lời.
@@ -63,8 +64,8 @@ Core **không được biết** Zalo hay Messenger là gì.
 
 | Thành phần | Lựa chọn | Lý do |
 |---|---|---|
-| Runtime | Node.js + TypeScript (Fastify) | SDK Zalo Bot API có bản TS; cùng runtime nếu sau này dùng zca-js |
-| Queue | Redis + BullMQ | Nhẹ, cùng chỗ với L1 memory |
+| Runtime | **Python 3.11 + FastAPI** | Người bảo trì đọc và sửa được — ràng buộc quan trọng nhất của một dự án một người |
+| Queue | Redis + ARQ | Nhẹ, cùng chỗ với L1 memory |
 | DB | Postgres + pgvector | L2, L3, L4 và log dùng chung một DB |
 | Deploy | Docker Compose → VPS Việt Nam | Zalo nhạy cảm với IP lạ |
 
@@ -133,7 +134,7 @@ Phát hiện mention hai lớp: đọc trường mention trong payload nếu có
 
 **L1 Working Memory:** 15 tin gần nhất mỗi thread, Redis, TTL 2h, key `ctx:{platform}:{thread_id}`. Trong nhóm prefix tên người gửi: `[Nam]: nội dung`.
 
-**System prompt:** tên bot, đang trong nhóm chat Việt Nam, tiếng Việt tự nhiên, dưới 4–5 câu trừ khi được hỏi chi tiết, **không dùng markdown nặng** (Zalo và Messenger đều không render), không biết thì nói không biết. `max_tokens` 500–800.
+**System prompt:** tên bot, đang trong nhóm chat Việt Nam, tiếng Việt tự nhiên, dưới 4–5 câu trừ khi được hỏi chi tiết, **không dùng markdown nặng** (Zalo và Messenger đều không render), không biết thì nói không biết. Về cap token xem `ARCHITECTURE.md` §8.1 — con số 500–800 ở đây đã lỗi thời và sẽ làm câu trả lời biến mất trên model reasoning.
 
 **Fallback:** API lỗi hoặc timeout > 15s → trả câu ngắn thay vì im lặng. Im lặng trong nhóm trông như bot chết và người dùng sẽ spam mention.
 

@@ -11,25 +11,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: astral-sh/setup-uv@v5
         with:
-          node-version: 22
-          cache: npm
+          # Phai khop requires-python trong pyproject.toml. De uv tu chon ban moi
+          # hon thi CI xanh tren 3.13 con may ban chay 3.11 — sai lech im lang.
+          python-version: "3.11"
+          enable-cache: true
 
-      - run: npm ci
+      # --frozen: dung dung uv.lock, khong tu giai lai phu thuoc. Lock troi ma CI
+      # van xanh thi CI dang kiem mot cay phu thuoc khac voi may ban.
+      - run: uv sync --frozen --all-groups
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Kiem tra kieu (mypy strict)
+        run: uv run mypy
 
-      # L1-L7: 8 luat kien truc trong ARCHITECTURE.md section 1.
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      # L1-L8: 8 luat kien truc trong ARCHITECTURE.md section 1.
       # Cuong che bang may, khong bang niem tin.
       - name: Luat kien truc
-        run: npm run lint:deps
+        run: uv run lint-imports
 
-      # L4: khong SQL nao cham memory_fact ngoai memory/repository/.
-      # dependency-cruiser khong doc duoc chuoi SQL — day la lop con thieu.
-      - name: Guard memory_fact
-        run: npm run guard:sql
+      # L7: chi config/ duoc doc bien moi truong. import-linter khong bat duoc —
+      # no so khop import module, con os.environ la truy cap thuoc tinh.
+      - name: Guard env (L7)
+        run: uv run python ops/guard_env.py
 
-      - name: Unit + contract test
-        run: npm test
+      # L4b: khong SQL nao cham memory_fact ngoai memory/repository/.
+      # Cung ly do: chuoi SQL khong phai import.
+      - name: Guard memory_fact (L4b)
+        run: uv run python ops/guard_sql.py
+
+      # Mot luat viet sai van chay xanh — no chi khong bat duoc gi. Canary tao vi
+      # pham co y va bat buoc moi luat phai DO len. Xem docs/dep-rules-verified.md.
+      - name: Canary — chung minh 8 luat con song
+        run: uv run python ops/canary_import_rules.py
+
+      - name: Unit test
+        run: uv run pytest

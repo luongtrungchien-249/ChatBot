@@ -1,8 +1,18 @@
-node_modules/
-dist/
+.venv/
+__pycache__/
+*.py[cod]
+
 .env
 .env.*
 !.env.example
+
+# Cache cua cong cu — deu tai sinh duoc, khong cai nao la nguon that.
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+htmlcov/
+.coverage
+
 *.log
-coverage/
 .DS_Store

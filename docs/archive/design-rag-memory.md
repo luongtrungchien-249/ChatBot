@@ -1,5 +1,11 @@
 # Thiết kế RAG & Memory
 
+> **Tài liệu lưu trữ — giữ nguyên như lúc viết, không sửa theo hiện trạng.**
+> Bản này ra đời trước khi dự án chốt kiến trúc và trước khi chuyển sang Python; phần stack, tên file
+> và ước lượng chi phí trong đây **đã lỗi thời**. Nó được giữ lại để tra cứu *lập luận* đã dẫn tới các
+> quyết định, không phải để làm theo. Bản đang có hiệu lực: `ARCHITECTURE.md` và
+> `docs/plan-thi-cong.md`.
+
 **Phụ lục cho:** Kế hoạch triển khai AI Chatbot cho Zalo & Messenger
 **Vai trò:** Senior AI Engineer
 **Scope:** Phase 5 — chỉ triển khai sau khi Phase 0–2 đã chạy ổn định

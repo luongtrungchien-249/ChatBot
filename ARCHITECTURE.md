@@ -13,13 +13,13 @@ Ba file kế hoạch để mở những thứ mà nếu không chốt thì khôn
 | # | Quyết định | Chốt | Lý do |
 |---|---|---|---|
 | D1 | Model chính | `gpt-5-mini` (OpenAI) | **Sửa 05/09/2026.** Trước là `claude-opus-5`. Rẻ hơn 20× input, 12,5× output; cửa sổ 400K. Chi phí ở §8.3. |
-| D2 | Model phụ (tóm tắt, rewrite, trích fact) | `gpt-5-mini` — cùng model | **Sửa 05/09/2026.** Hiện chỉ có một agent hỏi đáp. Khi tách multi-agent thì hạ ba route async xuống `gpt-5-nano` ($0,05/$0,40); đổi chỗ này là đổi một file `llm/models.ts`. |
+| D2 | Model phụ (tóm tắt, rewrite, trích fact) | `gpt-5-mini` — cùng model | **Sửa 05/09/2026.** Hiện chỉ có một agent hỏi đáp. Khi tách multi-agent thì hạ ba route async xuống `gpt-5-nano` ($0,05/$0,40); đổi chỗ này là đổi một file `llm/models.py`. |
 | D3 | Embedding + Rerank | Port riêng, nhà cung cấp cắm vào — **chốt ở tuần 4** | OpenAI có embedding (`text-embedding-3-small/large`) nhưng **không có rerank**, nên rerank vẫn phải là nhà cung cấp thứ hai. |
 | D4 | Số chiều vector | Cố định 1024, kiểm tra lúc khởi động | `VECTOR(1024)` trong plan là đã ngầm chọn model rồi. Chốt cho minh bạch. |
 
 **Ba chỗ tôi sửa so với plan:**
 
-1. **`max_tokens` 500–800 → 2000 → `max_completion_tokens` 16000.** Cắt cứng ở 800 token thì câu trả lời dài đứt giữa chừng. Chi phí output tính theo token **thực sinh ra**, không theo cap — nâng cap không tốn thêm tiền. **Sửa 05/09/2026:** `gpt-5-mini` là model reasoning, tham số đúng là `max_completion_tokens` và **token reasoning ăn vào cap đó**. Cap thấp thì API trả về `content` rỗng với `finish_reason: 'length'` — không lỗi, không ngoại lệ, câu trả lời chỉ đơn giản biến mất. Xem cảnh báo trong `llm/models.ts`.
+1. **`max_tokens` 500–800 → 2000 → `max_completion_tokens` 16000.** Cắt cứng ở 800 token thì câu trả lời dài đứt giữa chừng. Chi phí output tính theo token **thực sinh ra**, không theo cap — nâng cap không tốn thêm tiền. **Sửa 05/09/2026:** `gpt-5-mini` là model reasoning, tham số đúng là `max_completion_tokens` và **token reasoning ăn vào cap đó**. Cap thấp thì API trả về `content` rỗng với `finish_reason: 'length'` — không lỗi, không ngoại lệ, câu trả lời chỉ đơn giản biến mất. Xem cảnh báo trong `llm/models.py`.
 2. **Tin nhắn thô lưu Postgres, không lưu Redis.** Xem §6.1 — đây là lỗi mất dữ liệu trong plan, không phải khác biệt sở thích.
 3. **Meta App Review nộp cuối tuần 3, không phải ngày 1.** Ngày 1 làm Business Verification. Xem §11.
 
@@ -31,184 +31,218 @@ Ba file kế hoạch để mở những thứ mà nếu không chốt thì khôn
 
 | # | Luật | Vi phạm sẽ dẫn tới |
 |---|---|---|
-| L1 | `agents/` **không được import** bất cứ thứ gì trong `adapters/`, `infra/`, `llm/`, `memory/`, `knowledge/` | Bạn đang viết hai bot |
+| L1 | `agents/` **không được import** bất cứ thứ gì trong `adapters/`, `infra/`, `llm/`, `memory/`, `knowledge/`, `tools/`, `config/` | Bạn đang viết hai bot |
 | L2 | `agents/` giao tiếp với thế giới **chỉ qua interface trong `agents/ports/`** | Không test được agents nếu không dựng Redis + Postgres + API key |
 | L3 | Mọi truy vấn memory đi qua repository, nhận `ThreadScope` bắt buộc ở tham số đầu | Rò rỉ memory cross-group — lỗi phải gỡ sản phẩm |
 | L4 | Không có câu SQL nào chạm `memory_fact` ngoài `memory/repository/` | Cùng L3 |
 | L5 | Adapter chỉ làm 4 việc: verify → chuẩn hoá → enqueue → gửi trả lời. **Không gọi LLM, không đọc DB** | Logic nhân đôi giữa Zalo và Messenger |
 | L6 | Mọi lời gọi ra ngoài đi qua `infra/` hoặc `llm/` (có timeout, retry, log, đo cost) | Không biết tiền đi đâu, không debug được |
-| L7 | Config đọc **một lần** lúc khởi động, qua schema Zod. Không có `process.env` ngoài `config/` | Chạy được ở máy bạn, chết ở prod |
+| L7 | Config đọc **một lần** lúc khởi động, qua schema pydantic-settings. Không có `os.environ` ngoài `config/` | Chạy được ở máy bạn, chết ở prod |
 | L8 | Mỗi tin nhắn vào có đúng **một** `traceId` xuyên suốt mọi log | Không truy được một hội thoại hỏng |
 
-**Cưỡng chế bằng máy, không bằng niềm tin:**
+**Cưỡng chế bằng máy, không bằng niềm tin — ba công cụ, vì một công cụ không đủ:**
 
-```jsonc
-// .dependency-cruiser.cjs — chạy trong CI, fail build khi vi phạm
-{
-  "forbidden": [
-    { "name": "agents-khong-biet-ha-tang",
-      "from": { "path": "^src/agents" },
-      "to":   { "path": "^src/(adapters|infra|llm|memory|knowledge)" } },
-    { "name": "adapter-khong-goi-adapter",
-      "from": { "path": "^src/adapters/([^/]+)" },
-      "to":   { "path": "^src/adapters/(?!$1)" } },
-    { "name": "memory-fact-chi-o-repository",
-      "from": { "pathNot": "^src/memory/repository" },
-      "to":   { "path": "memory_fact" } }
-  ]
-}
+```ini
+# .importlinter — chay trong CI (uv run lint-imports), fail build khi vi pham
+[importlinter]
+root_packages = adapters agents config infra knowledge llm main memory shared tools
+
+[importlinter:contract:1]
+name = L1: agents khong biet ha tang
+type = forbidden
+source_modules = agents
+forbidden_modules = adapters infra llm memory knowledge tools
 ```
+
+`import-linter` chỉ so khớp **import module**. Hai lỗ nó không bịt được, mỗi lỗ một script AST:
+
+| Lỗ | Vì sao import-linter mù | Lớp bù |
+|---|---|---|
+| L7 — `os.environ` ngoài `config/` | `os.environ` là **truy cập thuộc tính**, không phải import | `ops/guard_env.py` |
+| L4 — SQL chạm `memory_fact` ngoài `memory/repository/` | Câu SQL là **chuỗi**, không phải import | `ops/guard_sql.py` |
+
+Và cả ba đều được **chứng minh** bằng `ops/canary_import_rules.py`: script tạo vi phạm cố ý cho từng
+luật, chạy lại công cụ, và bắt buộc luật phải **đỏ**. Một luật viết sai vẫn chạy xanh — nó chỉ đơn giản
+là không bắt được gì, và bạn sẽ không biết cho tới lúc kiến trúc đã vỡ.
 
 ---
 
-## 2. Hình thái triển khai: một codebase, ba process
+## 2. Hình thái triển khai: một codebase, bốn process
 
-Không monorepo. Một `package.json`, ba entrypoint. Một người làm thì workspace chỉ là nghi lễ.
+Không monorepo. Một `pyproject.toml`, bốn entrypoint. Một người làm thì workspace chỉ là nghi lễ.
 
 | Process | File | Nhiệm vụ | Scale theo |
 |---|---|---|---|
-| `api` | `src/main/api.ts` | Fastify: webhook Zalo + Meta, health, admin. **Trả 200 trong <2s rồi thôi** | Số webhook/giây |
-| `worker` | `src/main/worker.ts` | BullMQ: pipeline trả lời, tóm tắt, trích fact, ingest | Chi phí LLM |
-| `cli` | `src/main/cli.ts` | Chat với agents qua terminal, ingest tài liệu, dump memory | — |
+| `api` | `src/main/api.py` | FastAPI: giao diện web + SSE, webhook Zalo + Meta, health. **Trả 200 trong <2s rồi thôi** | Số webhook/giây |
+| `worker` | `src/main/worker.py` | ARQ: pipeline trả lời, tóm tắt, trích fact, ingest | Chi phí LLM |
+| `zalo` | `src/main/zalo.py` | Long-poll Zalo Bot, chuẩn hoá, xếp hàng | — |
+| `cli` | `src/main/cli.py` | Chat với agents qua terminal, migrate, quản trị allowlist | — |
+
+`zalo` tách riêng có chủ đích: long-poll là một vòng lặp treo liên tục, nhét nó vào `api` nghĩa là một
+lỗi trong vòng poll kéo cả giao diện web xuống theo.
 
 `cli` không phải đồ chơi. Nó là **adapter thứ ba** và là cách duy nhất để làm Phase 0 khi chưa có token Zalo/Meta. Nếu agents chỉ chạy được khi có webhook thật thì kiến trúc đã sai từ đầu.
+
+### Stack
+
+| Vai trò | Chọn |
+|---|---|
+| Ngôn ngữ | Python 3.11, `mypy --strict` |
+| Quản lý gói | `uv` (lockfile `uv.lock`) |
+| HTTP | FastAPI + uvicorn |
+| Hàng đợi | ARQ (trên Redis) |
+| DB | asyncpg → Postgres + pgvector |
+| Config | pydantic-settings |
+| Log | structlog |
+| Test | pytest |
+| Lint / luật kiến trúc | ruff · import-linter · hai script AST trong `ops/` |
+| Giao diện web | Jinja2 + JavaScript thuần — **không có bước build, không có Node** |
+
+Giao diện từng là React + TypeScript + Vite. Cả trang chỉ có hai danh sách và một ô nhập; kéo theo cả
+một toolchain Node để vẽ bấy nhiêu đó là chi phí bảo trì không mua được gì. Trình duyệt không chạy được
+Python, nên phần chạy trên máy người dùng vẫn là JavaScript — nhưng là JavaScript thuần, đọc thẳng,
+sửa xong tải lại trang.
 
 ---
 
 ## 3. Cây thư mục
 
+Mười gói cấp cao nhất dưới `src/`, mỗi gói là một **tầng**. Không có gói bao bọc ngoài: tên tầng chính
+là thứ người đọc code cần thấy đầu tiên, và `from agents.ports.llm import LlmPort` nói rõ hơn một tiền
+tố lặp lại ở mọi dòng import. Đổi lại, các tên này chiếm không gian tên cấp cao nhất, nên **thêm một
+phụ thuộc mới thì phải kiểm xem nó có gói cấp cao nhất nào trùng tên không**.
+
+`✗` = chưa viết, có chủ đích. Xem `docs/plan-thi-cong.md` để biết thuộc giai đoạn nào.
+
 ```
 chatbot/
 ├─ src/
 │  ├─ main/                        # Entrypoint — mỏng, chỉ wiring
-│  │  ├─ api.ts                    # Fastify server
-│  │  ├─ worker.ts                 # BullMQ workers
-│  │  ├─ cli.ts                    # REPL + lệnh quản trị
-│  │  └─ container.ts              # Dependency injection thủ công (không dùng framework DI)
+│  │  ├─ api.py                    # FastAPI: giao diện web, SSE, (sau) webhook
+│  │  ├─ worker.py                 # ARQ worker
+│  │  ├─ zalo.py                   # Long-poll Zalo Bot
+│  │  ├─ cli.py                    # REPL + migrate + allow/deny/allowed
+│  │  └─ container.py              # Dependency injection thủ công (không framework DI)
 │  │
 │  ├─ config/
-│  │  ├─ schema.ts                 # Zod schema cho toàn bộ env
-│  │  ├─ index.ts                  # parse 1 lần, export object đã đóng băng
-│  │  └─ policy.ts                 # allowlist, ngưỡng, admin — tách khỏi secret
+│  │  ├─ schema.py                 # pydantic-settings cho toàn bộ env
+│  │  └─ __init__.py               # đọc 1 lần (lru_cache), export get_settings()
 │  │
-│  ├─ agents/                      # ⛔ KHÔNG import adapters/infra/llm/memory/knowledge
+│  ├─ agents/                      # ⛔ KHÔNG import adapters/infra/llm/memory/knowledge/tools/config
 │  │  ├─ domain/
-│  │  │  ├─ message.ts             # InboundMessage, OutboundMessage
-│  │  │  ├─ thread.ts              # ThreadScope — khoá chống rò rỉ
-│  │  │  └─ errors.ts              # Taxonomy lỗi (§9)
-│  │  ├─ ports/                    # Interface — agents chỉ biết đến những cái này
-│  │  │  ├─ llm.port.ts
-│  │  │  ├─ memory.port.ts
-│  │  │  ├─ knowledge.port.ts
-│  │  │  ├─ channel.port.ts        # Gửi tin ra — adapter implement
-│  │  │  ├─ ratelimit.port.ts
-│  │  │  └─ clock.port.ts          # Có port cho thời gian → test xác định được
+│  │  │  ├─ message.py             # InboundMessage, OutboundMessage, StoredMessage
+│  │  │  ├─ thread.py              # ThreadScope — khoá chống rò rỉ
+│  │  │  └─ errors.py              # Taxonomy lỗi (§9)
+│  │  ├─ ports/                    # Protocol — agents chỉ biết đến những cái này
+│  │  │  ├─ llm.py  memory.py  knowledge.py  channel.py
+│  │  │  ├─ ratelimit.py  clock.py  logger.py
+│  │  │  └─ tool.py                # ToolPort — công cụ gọi mạng nên đứng sau port
 │  │  ├─ policy/
-│  │  │  ├─ mention.ts             # Bóc @nam_chatbot: 2 lớp payload + regex
-│  │  │  ├─ access.ts              # dmPolicy / groupPolicy
-│  │  │  └─ command.ts             # memory / quên / help — parse TRƯỚC khi vào LLM
+│  │  │  ├─ mention.py             # Bóc @ten_bot: 2 lớp payload + regex có dấu tiếng Việt
+│  │  │  ├─ access.py              # dm_policy / group_policy + tự vựng GroupPolicy/DmPolicy
+│  │  │  └─ command.py             # memory / quên / help — parse TRƯỚC khi vào LLM
 │  │  ├─ prompt/
-│  │  │  ├─ system.ts              # System prompt — HẰNG SỐ, không nội suy biến động
-│  │  │  ├─ builder.ts             # Ghép L4→L3→L2→L1 theo thứ tự §7.3
-│  │  │  └─ budget.ts              # Hard cap token từng tầng
+│  │  │  ├─ system.py              # System prompt — HẰNG SỐ, không nội suy biến động
+│  │  │  ├─ instructions.py        # Instruction prompt theo từng tác vụ — cũng là hằng số
+│  │  │  ├─ context.py             # 5 vùng ngữ cảnh (§7.3)
+│  │  │  ├─ builder.py             # Render từng khối + sanitize chống thoát thẻ
+│  │  │  └─ budget.py              # Cầu dao token từng tầng
 │  │  └─ pipeline/
-│  │     ├─ handle-message.ts      # Orchestrator — đọc file này là hiểu cả hệ thống
+│  │     ├─ handle_message.py      # Orchestrator — đọc file này là hiểu cả hệ thống
 │  │     └─ stages/                # Mỗi stage một file, thuần, test riêng được
+│  │        ├─ access.py  mention.py  budget_guard.py  persist.py
+│  │        ├─ typing_.py  build_prompt.py  respond.py
+│  │        └─ generate.py         # VÒNG ReAct + 6 chặn cứng
 │  │
-│  ├─ memory/                      # L1 L2 L3 — implement memory.port
+│  ├─ memory/                      # L1 L2 L3 — implement MemoryPort
 │  │  ├─ repository/
-│  │  │  ├─ message.repo.ts        # L1 (Postgres là nguồn thật, Redis là cache)
-│  │  │  ├─ summary.repo.ts        # L2
-│  │  │  └─ fact.repo.ts           # L3 — CHỖ DUY NHẤT chạm memory_fact
-│  │  ├─ jobs/
-│  │  │  ├─ summarize.job.ts       # Rolling summarization (async)
-│  │  │  └─ extract-facts.job.ts   # Implicit extraction (async, bật sau cùng)
-│  │  └─ dedupe.ts                 # Chống trùng / mâu thuẫn fact bằng cosine
+│  │  │  ├─ message_repo.py        # L1 (Postgres là nguồn thật, Redis là cache)
+│  │  │  ├─ summary_repo.py     ✗  # L2
+│  │  │  └─ fact_repo.py        ✗  # L3 — CHỖ DUY NHẤT chạm memory_fact
+│  │  ├─ jobs/                  ✗  # summarize.py, extract_facts.py (async)
+│  │  └─ dedupe.py              ✗  # Chống trùng / mâu thuẫn fact bằng cosine
 │  │
-│  ├─ knowledge/                   # L4 RAG — implement knowledge.port
-│  │  ├─ ingest/
-│  │  │  ├─ extract.ts             # pdf/docx/md/txt → text
-│  │  │  ├─ chunk.ts               # cắt theo heading/đoạn, 500–800 tok, overlap 100
-│  │  │  ├─ contextualize.ts       # thêm 1–2 câu ngữ cảnh trước khi embed
-│  │  │  └─ pipeline.ts
-│  │  └─ retrieve/
-│  │     ├─ vector.ts              # pgvector cosine → top 20
-│  │     ├─ lexical.ts             # tsvector + unaccent → top 20   ← xem §6.3
-│  │     ├─ fusion.ts              # Reciprocal Rank Fusion → top 10
-│  │     ├─ rerank.ts              # cross-encoder → top 3–5 + NGƯỠNG
-│  │     └─ rewrite.ts             # viết lại câu hỏi bằng L1
+│  ├─ knowledge/                ✗  # L4 RAG — implement KnowledgePort
+│  │  ├─ ingest/                   # extract, chunk, contextualize, pipeline
+│  │  └─ retrieve/                 # vector, lexical, fusion, rerank, rewrite
 │  │
 │  ├─ llm/
-│  │  ├─ anthropic.client.ts       # Bọc @anthropic-ai/sdk, implement llm.port
-│  │  ├─ models.ts                 # ID model + effort + cap — MỘT chỗ duy nhất
-│  │  ├─ embedder.ts               # implement embedder port (nhà cung cấp cắm vào)
-│  │  ├─ reranker.ts               # implement reranker port
-│  │  └─ cost-meter.ts             # Ghi token in/out/cache mỗi call → usage_log
+│  │  ├─ openai_client.py          # Bọc SDK OpenAI, implement LlmPort
+│  │  ├─ models.py                 # ID model + effort + cap + giá — MỘT chỗ duy nhất
+│  │  ├─ cost_meter.py             # Ghi token in/out/cache mỗi call → usage_log
+│  │  ├─ embedder.py            ✗  # implement EmbedderPort (nhà cung cấp cắm vào)
+│  │  └─ reranker.py            ✗  # implement RerankerPort
+│  │
+│  ├─ tools/                       # Công cụ agent gọi được — implement ToolPort
+│  │  ├─ registry.py               # Nơi DUY NHẤT biết tên nhà cung cấp công cụ
+│  │  ├─ guard.py                  # Bọc thẻ + dò injection + cắt trần observation
+│  │  ├─ web_search.py             # Tavily
+│  │  └─ paper_search.py           # OpenAlex + arXiv + Semantic Scholar + Crossref
 │  │
 │  ├─ adapters/                    # Mỗi adapter là một hộp kín
-│  │  ├─ zalo-bot/
-│  │  │  ├─ webhook.route.ts
-│  │  │  ├─ polling.ts             # getUpdates — chế độ dev
-│  │  │  ├─ normalize.ts           # payload Zalo → InboundMessage
-│  │  │  ├─ send.ts                # sendMessage + chunk
-│  │  │  └─ fixtures/              # payload thật đã ghi lại → contract test
-│  │  ├─ messenger/
-│  │  │  ├─ verify.route.ts        # GET hub.challenge
-│  │  │  ├─ webhook.route.ts       # POST + X-Hub-Signature-256 trên RAW body
-│  │  │  ├─ normalize.ts
-│  │  │  ├─ send.ts                # typing_on, chunk 2000 ký tự
-│  │  │  └─ fixtures/
-│  │  ├─ zalo-personal/            # Tùy chọn — chỉ tạo khi thật sự cần
-│  │  └─ cli/
-│  │     └─ normalize.ts           # Adapter thứ ba, dùng để dev Phase 0
+│  │  ├─ zalo_bot/
+│  │  │  ├─ api.py                 # getMe / getUpdates / sendMessage
+│  │  │  ├─ polling.py             # Long-poll + ingest() dùng chung cho cả webhook
+│  │  │  ├─ normalize.py           # payload Zalo → InboundMessage
+│  │  │  └─ send.py                # ChannelPort, chunk 2000 ký tự
+│  │  ├─ web/
+│  │  │  ├─ routes.py              # /api/chat, /api/stream/{id}, /api/threads...
+│  │  │  ├─ normalize.py  send.py  # ChannelPort → PUBLISH Redis → SSE
+│  │  │  ├─ templates/index.html   # Jinja2 — không có bước build
+│  │  │  └─ static/app.js styles.css
+│  │  ├─ messenger/             ✗  # verify, webhook + HMAC trên RAW body, normalize, send
+│  │  ├─ zalo_personal/         ✗  # Tùy chọn — chỉ tạo khi thật sự cần
+│  │  └─ cli/normalize.py          # Adapter thứ ba, dùng để dev Phase 0
 │  │
 │  ├─ infra/
-│  │  ├─ db.ts                     # pg pool
-│  │  ├─ redis.ts
-│  │  ├─ queue.ts                  # BullMQ — queue + jobId + FIFO theo thread (§5.2)
-│  │  ├─ logger.ts                 # pino, luôn kèm traceId
-│  │  ├─ metrics.ts
-│  │  ├─ ratelimit.ts              # token bucket, Lua script atomic
-│  │  └─ dedupe.ts                 # SET NX — atomic, KHÔNG check-then-set
+│  │  ├─ db.py                     # asyncpg pool
+│  │  ├─ redis_client.py           # KHÔNG đặt tên redis.py — sẽ che mất gói thật
+│  │  ├─ queue.py                  # ARQ — queue + job_id + FIFO theo thread (§5.2)
+│  │  ├─ logger.py                 # structlog, luôn kèm trace_id, luôn redact
+│  │  ├─ dedupe.py                 # SET NX — atomic, KHÔNG check-then-set
+│  │  ├─ cancel.py                 # Cờ dừng qua Redis (api và worker là hai process)
+│  │  ├─ allowlist.py              # Bảng thread_allowlist
+│  │  ├─ ratelimit.py              # Chốt chặn ngân sách ngày + (✗) token bucket 3 tầng
+│  │  └─ metrics.py             ✗  # Health + counter/histogram cho dashboard
 │  │
 │  └─ shared/
-│     ├─ result.ts                 # Result<T,E> — lỗi là giá trị, không phải throw
-│     ├─ chunk-text.ts
-│     └─ redact.ts                 # Che token / số điện thoại trước khi log
+│     ├─ result.py                 # Result[T,E] — lỗi là giá trị, không phải raise
+│     ├─ chunk_text.py
+│     └─ redact.py                 # Che token / số điện thoại trước khi log
 │
 ├─ db/
 │  ├─ migrations/                  # Đánh số tăng dần, chỉ tiến, không sửa file cũ
-│  │  ├─ 0001_extensions.sql
-│  │  ├─ 0002_messages.sql
-│  │  ├─ 0003_memory.sql
-│  │  ├─ 0004_knowledge_1024.sql   # Số chiều nằm trong TÊN file — đổi dim = migration mới
-│  │  └─ 0005_ops.sql
+│  │  ├─ 0001_extensions.sql       0004_knowledge_1024.sql   ← số chiều nằm trong TÊN file
+│  │  ├─ 0002_messages.sql         0005_ops.sql
+│  │  ├─ 0003_memory.sql           0006_message_direction.sql
+│  │  └─                           0007_thread_meta.sql
 │  └─ seed/
 │
 ├─ evals/
 │  ├─ dataset/qa.jsonl             # 50 câu: {question, answer, expected_chunk_ids}
-│  ├─ runner.ts
-│  └─ metrics/                     # recall@5, faithfulness, relevance, latency, cost
+│  ├─ runner.py                 ✗
+│  └─ metrics/                     # recall@5, faithfulness, latency
 │
-├─ test/
+├─ tests/
 │  ├─ unit/                        # chỉ agents/ — không I/O
-│  ├─ contract/                    # adapters ăn fixtures thật
-│  ├─ integration/                 # testcontainers: postgres+pgvector, redis
+│  ├─ contract/                 ✗  # adapters ăn fixtures thật
+│  ├─ integration/              ✗  # testcontainers: postgres+pgvector, redis
 │  └─ security/
-│     └─ cross-thread-leak.test.ts # ⚠ Test bắt buộc, xem §10
+│     └─ test_cross_thread_leak.py # ⚠ Test bắt buộc, xem §10
 │
 ├─ ops/
-│  ├─ docker-compose.yml           # api, worker, postgres(pgvector), redis
+│  ├─ docker-compose.yml           # api, worker, zalo, postgres(pgvector), redis
 │  ├─ Dockerfile
+│  ├─ guard_env.py                 # L7 — cưỡng chế bằng AST
+│  ├─ guard_sql.py                 # L4b — cưỡng chế bằng AST
+│  ├─ canary_import_rules.py       # Chứng minh cả 8 luật thật sự bắt được vi phạm
 │  └─ grafana/
 │
-├─ docs/
-│  ├─ master-plan-chatbot.md       # lộ trình: làm gì, tuần nào
-│  └─ archive/                     # plan v2 + design-rag — đã bị file này thay thế
-├─ .dependency-cruiser.cjs         # cưỡng chế 8 luật ở §1
+├─ docs/                           # master-plan, plan-thi-cong, dep-rules-verified, archive/
+├─ .importlinter                   # cưỡng chế luật ở §1
 ├─ .env.example
-├─ package.json
-├─ tsconfig.json
+├─ pyproject.toml                  # phụ thuộc + mypy + ruff + pytest, một chỗ
+├─ uv.lock
 ├─ README.md
 └─ ARCHITECTURE.md
 ```
@@ -219,53 +253,68 @@ chatbot/
 
 Đây là toàn bộ bề mặt mà `agents/` được phép nhìn thấy. Ngắn là có chủ ý.
 
-```ts
-// agents/domain/thread.ts
-// Không truyền platform + threadId rời rạc. Truyền một object.
-// Lý do: không ai quên tham số thứ hai của một object cả.
-export type ThreadScope = Readonly<{
-  platform: 'zalo_bot' | 'zalo_personal' | 'messenger' | 'cli';
-  threadId: string;
-}>;
+Port là `typing.Protocol`, không phải lớp cơ sở: cấu trúc khớp là đủ, nên `structlog.BoundLogger` cắm
+thẳng vào `LoggerPort` mà không cần một lớp adapter chỉ để thoả kế thừa.
 
-// agents/ports/llm.port.ts
-export interface LlmPort {
-  reply(req: {
-    system: string;               // đã đóng băng, để prompt caching ăn
-    messages: LlmMessage[];
-    maxTokens: number;
-    effort: 'low' | 'medium' | 'high';
-    tools?: ToolSpec[];
-    traceId: string;
-  }): Promise<LlmResult>;         // { text, toolCalls, usage }
+```python
+# agents/domain/thread.py
+# Không truyền platform + thread_id rời rạc. Truyền một object.
+# Lý do: không ai quên tham số thứ hai của một object cả.
+Platform = Literal["zalo_bot", "zalo_personal", "messenger", "cli", "web"]
 
-  cheap(req: {
-    system: string; input: string; maxTokens: number; traceId: string;
-  }): Promise<string>;            // Haiku: rewrite / summarize / extract
-}
+@dataclass(frozen=True, slots=True)
+class ThreadScope:
+    platform: Platform
+    thread_id: str
 
-// agents/ports/memory.port.ts
-export interface MemoryPort {
-  recent(scope: ThreadScope, limit: number): Promise<StoredMessage[]>;            // L1
-  summary(scope: ThreadScope): Promise<string | null>;                            // L2
-  facts(scope: ThreadScope, subjectId: string, query: string): Promise<Fact[]>;   // L3
-  remember(scope: ThreadScope, fact: NewFact): Promise<void>;
-  forget(scope: ThreadScope, actorId: string, pattern: string): Promise<Fact[]>;
-  list(scope: ThreadScope, subjectId: string): Promise<Fact[]>;
-}
-// Mọi phương thức nhận ThreadScope ở tham số ĐẦU TIÊN. Không có overload nào bỏ nó.
+# agents/ports/llm.py
+class LlmPort(Protocol):
+    async def reply(
+        self, *, system: str, messages: tuple[LlmMessage, ...], max_tokens: int,
+        effort: Effort, ctx: CallContext, tools: tuple[ToolSpec, ...] = (),
+    ) -> LlmResult: ...          # system PHẢI là hằng số
 
-// agents/ports/knowledge.port.ts
-export interface KnowledgePort {
-  search(query: string, k: number): Promise<RetrievedChunk[]>;  // đã fusion + rerank + lọc ngưỡng
-}
+    async def cheap(
+        self, *, system: str, input: str, max_tokens: int,
+        route: CheapRoute, ctx: CallContext,
+    ) -> str: ...                # rewrite / summarize / extract_facts
 
-// agents/ports/channel.port.ts
-export interface ChannelPort {
-  typing(scope: ThreadScope): Promise<void>;
-  send(scope: ThreadScope, text: string, replyTo?: string): Promise<void>;
-  readonly maxMessageChars: number;   // Messenger 2000 — agents không hardcode con số này
-}
+# LlmMessage là UNION, không phải {role, content} phẳng: lượt assistant có thể KHÔNG
+# có văn bản mà chỉ có lời gọi tool, và lượt tool phải mang theo tool_call_id. Kiểu
+# phẳng không biểu diễn được vòng ReAct.
+LlmMessage: TypeAlias = UserMessage | AssistantMessage | ToolMessage
+
+# agents/ports/memory.py
+class MemoryPort(Protocol):
+    async def append(self, scope: ThreadScope, msg: NewMessage) -> None: ...
+    async def recent(self, scope: ThreadScope, limit: int) -> list[StoredMessage]: ...   # L1
+    async def summary(self, scope: ThreadScope) -> str | None: ...                       # L2
+    async def facts(self, scope: ThreadScope, subject_id: str, query: str) -> list[Fact]: ...  # L3
+    async def remember(self, scope: ThreadScope, fact: NewFact) -> None: ...
+    async def forget(self, scope: ThreadScope, actor_id: str, pattern: str) -> list[Fact]: ...
+    async def list_facts(self, scope: ThreadScope, subject_id: str) -> list[Fact]: ...
+# Mọi phương thức nhận ThreadScope ở tham số ĐẦU TIÊN. Không có biến thể nào bỏ nó.
+
+# agents/ports/knowledge.py
+class KnowledgePort(Protocol):
+    async def search(self, query: str, k: int) -> list[RetrievedChunk]: ...
+    # đã fusion + rerank + lọc ngưỡng. Rỗng = "không tìm thấy", không phải lỗi.
+
+# agents/ports/channel.py
+class ChannelPort(Protocol):
+    max_message_chars: int       # Zalo 2000 — agents không hardcode con số của nền tảng
+    async def typing(self, scope: ThreadScope) -> None: ...
+    async def send(self, scope: ThreadScope, text: str, reply_to: str | None = None) -> None: ...
+
+# agents/ports/tool.py — thêm ở Giai đoạn 3
+class ToolPort(Protocol):
+    def specs(self) -> tuple[ToolDefinition, ...]: ...
+    async def call_many(
+        self, calls: tuple[ToolCall, ...], ctx: CallContext
+    ) -> tuple[ToolResult, ...]: ...
+    # call_many chứ không phải call: model trả nhiều tool_call trong MỘT message và
+    # chúng phải chạy đồng thời. Phải trả ĐỦ số kết quả, kể cả cái thất bại —
+    # thiếu một tool_call_id là cả request sau trả 400.
 ```
 
 ---
@@ -275,45 +324,52 @@ export interface ChannelPort {
 ### 5.1 Đường vào (process `api`, phải xong <2s)
 
 ```
-HTTP POST
+HTTP POST  (hoặc một vòng getUpdates của process `zalo`)
   → verify chữ ký           Messenger: HMAC-SHA256 trên RAW body
                             Zalo: đường dẫn bí mật + shared token
   → parse tối thiểu, lấy message_id
   → dedupe.claim(id)        Redis SET NX EX 600 — atomic, không phải GET rồi SET
   → normalize()             → InboundMessage
-  → queue.add(jobId=message_id, group=thread_id)
-  → return 200              ⟵ KẾT THÚC. Không chờ LLM ở đây.
+  → enqueue_reply(msg)      job_id = message_id
+  → return 202              ⟵ KẾT THÚC. Không chờ LLM ở đây.
 ```
 
-Verify chữ ký phải chạy **trên raw body, trước `JSON.parse`**. Fastify cần bật `rawBody` cho route Meta; không có nó thì HMAC luôn sai và bạn sẽ ngồi debug nhầm chỗ.
+Verify chữ ký phải chạy **trên raw body, trước khi parse JSON**. Trong FastAPI phải đọc
+`await request.body()` và tự parse; nhận `body: Model` như route thường là đã parse mất rồi, và HMAC sẽ
+luôn sai trên payload đã chuẩn hoá lại — bạn sẽ ngồi debug nhầm chỗ cả ngày.
 
 ### 5.2 Hàng đợi
 
-```ts
-// infra/queue.ts
-new Queue('reply', {
-  defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-});
-// jobId = message_id                  → BullMQ chống trùng, lớp thứ 2 sau Redis SET NX
+```python
+# infra/queue.py
+await queue.enqueue_job(
+    "handle_reply", to_payload(msg),
+    _job_id=job_id_for(msg.platform, msg.message_id),   # lớp chống trùng thứ 2
+    _queue_name=QUEUE_REPLY,
+)
 ```
 
 **Đây là chỗ plan bỏ sót hoàn toàn.** Hai tin nhắn liên tiếp trong một nhóm chạy song song thì bot
 **trả lời sai thứ tự**.
 
-**Sửa 05/09/2026:** bản trước của tài liệu này viết `group: '${platform}:${threadId}'` như thể BullMQ có
-sẵn. **Không có.** `group` là tính năng của **BullMQ Pro** (trả phí); đã kiểm tra toàn bộ typings
-`bullmq@5.81.4`: không có trường nào tên `group`.
+ARQ không có khái niệm "group" — không có cách khai báo "các job cùng `thread_id` phải chạy tuần tự".
+Giải pháp hiện tại: `WorkerSettings.max_jobs = 1` — tuần tự toàn cục, thứ tự đúng tuyệt đối. Trần thông
+lượng ~240 câu/giờ ở trường hợp xấu nhất (timeout 15s/câu), trong khi mục tiêu là 200–1000 câu một
+**ngày**. Chạm trần thì tự khoá phân tán per-thread bằng Redis. Không giải quyết sớm một vấn đề chưa có.
 
-Giải pháp hiện tại: `Worker` của queue `reply` đặt `concurrency: 1` — tuần tự toàn cục, thứ tự đúng
-tuyệt đối. Trần thông lượng ~240 câu/giờ ở trường hợp xấu nhất (timeout 15s/câu), trong khi mục tiêu là
-200–1000 câu một **ngày**. Khi nào chạm trần thì chọn: mua BullMQ Pro, hoặc tự khoá phân tán per-thread
-bằng Redis.
+**Hai bẫy đã trả giá, ghi ra để không dẫm lại:**
+
+- `WorkerSettings` **phải** khai `queue_name = QUEUE_REPLY` khớp với `_queue_name` lúc enqueue. Thiếu
+  dòng đó thì worker lắng nghe queue mặc định còn job nằm ở queue `reply` — **không ai nhận, không ai
+  báo lỗi**.
+- `job_id` dùng `-` chứ không dùng `:`. Một số hàng đợi coi `:` là dấu phân cách khoá Redis và từ chối
+  thẳng. Các khoá Redis khác trong dự án vẫn dùng `:` bình thường; ràng buộc này của riêng `job_id`.
 
 Ba queue tách biệt: `reply` (đường phản hồi, ưu tiên), `maintenance` (tóm tắt, trích fact), `ingest` (nạp tài liệu). Không trộn — một job ingest 10 phút không được phép chặn một câu trả lời.
 
 ### 5.3 Pipeline (process `worker`)
 
-`agents/pipeline/handle-message.ts` — danh sách stage tường minh, mỗi stage một file thuần:
+`agents/pipeline/handle_message.py` — danh sách stage tường minh, mỗi stage một file thuần:
 
 ```
  1. access          Thread có trong allowlist? Không → dừng, im lặng.
@@ -324,7 +380,7 @@ Ba queue tách biệt: `reply` (đường phản hồi, ưu tiên), `maintenance
                     ⟵ CHỐT CHẶN CỨNG, không phải alert.
  6. persist         Ghi tin vào Postgres (nguồn thật) + đẩy Redis cache.
  7. typing          channel.typing() — không await.
- 8. rewrite         Câu hỏi thiếu ngữ cảnh → viết lại bằng L1 (Haiku).
+ 8. rewrite         Câu hỏi thiếu ngữ cảnh → viết lại bằng model rẻ.
  9. retrieve        knowledge.search() khi model gọi tool hoặc heuristic bật.
 10. recall          L2 summary + L3 facts (luôn kèm ThreadScope).
 11. build-prompt    Ghép theo §7.3, áp hard cap từng tầng.
@@ -414,12 +470,27 @@ CREATE INDEX ON memory_fact USING hnsw (embedding vector_cosine_ops) WHERE revok
 
 | Lệnh | Ai được dùng | Phạm vi |
 |---|---|---|
+| `nhớ giúp: <nội dung>` | bất kỳ ai | ghi fact về chính mình, `source=explicit`, `confidence=1.0` |
 | `memory` | bất kỳ ai | fact có `subject_id = 'user:' \|\| sender_id`, **trong thread hiện tại** |
-| `quên <nội dung>` | bất kỳ ai | chỉ fact về **chính mình**; khớp cosine > 0.85, liệt kê ra và **hỏi xác nhận** trước khi revoke |
+| `quên <nội dung>` | bất kỳ ai | chỉ fact về **chính mình**; liệt kê ứng viên rồi **hỏi xác nhận** trước khi revoke |
 | `quên hết` | bất kỳ ai | chỉ fact về chính mình |
-| fact `thread:*` | chỉ admin thread (khai trong `config/policy.ts`) | fact chung của nhóm |
+| `đồng ý` / `đồng ý 1,3` | người vừa gõ `quên` | xác nhận tất cả, hoặc chọn theo số |
+| fact `thread:*` | chỉ admin thread (bảng `thread_allowlist`) | fact chung của nhóm |
 
 Không có bước xác nhận thì một lần gõ nhầm là mất sạch, mà soft delete lại không có lệnh khôi phục. Trong nhóm 50 người, "ai được xoá của ai" không thể để ngỏ.
+
+`subject_id` **suy ra từ `sender_id` của tin nhắn**, không bao giờ nhận từ văn bản người dùng gõ — đó là
+chỗ chặn "người X xoá fact của người Y".
+
+**Ngưỡng cosine — sửa 06/09/2026.** Bản trước ghi `> 0,9` cho chống trùng và `> 0,85` cho lệnh `quên`.
+Cả hai viết trước khi có phép đo nào và **cả hai đều sai** với `text-embedding-3-large` @ 1024 chiều:
+
+| | Cũ | Đo được (`ops/calibrate_dedupe.py`) | Chốt |
+|---|---|---|---|
+| Trùng ý / mâu thuẫn | 0,90 | cần bắt 0,736–0,958 · cần bỏ qua 0,276–0,524 | **0,70** |
+| Lệnh `quên` | 0,85 | cách người dùng nói khớp chỉ 0,354–0,589 | **0,30** + top-5 |
+
+Với 0,85 thì lệnh `quên` không bao giờ tìm thấy gì, và người dùng tưởng đã xoá xong.
 
 ### 6.3 Knowledge L4 — schema mà cả 3 file kế hoạch **không hề có**
 
@@ -511,7 +582,7 @@ CREATE TABLE thread_allowlist (
 | `rl:t:{platform}:{thread_id}` | hash | 1 phút | token bucket per-thread |
 | `cost:day:{YYYY-MM-DD}` | string | 48h | chốt chặn ngân sách ngày |
 | `emb:{sha256(query)}` | string | 24h | cache embedding câu hỏi lặp |
-| `bull:*` | — | — | BullMQ |
+| `arq:*` | — | — | ARQ |
 
 ---
 
@@ -519,7 +590,7 @@ CREATE TABLE thread_allowlist (
 
 ### 7.1 System prompt phải là hằng số
 
-`agents/prompt/system.ts` export một chuỗi **không nội suy gì hết** — không tên nhóm, không ngày giờ, không tên người dùng. Thông tin động đi vào block riêng, đặt sau.
+`agents/prompt/system.py` export một chuỗi **không nội suy gì hết** — không tên nhóm, không ngày giờ, không tên người dùng. Thông tin động đi vào block riêng, đặt sau.
 
 **Sửa 05/09/2026:** lý do ban đầu là prompt caching (khớp theo tiền tố, đổi một byte là mất cache phía
 sau). Ở `gpt-5-mini` caching gần như không đáng kể (§8.3), nhưng luật này **vẫn giữ nguyên** vì lý do
@@ -538,7 +609,7 @@ Nội dung bắt buộc (giữ đúng plan): tên bot; đang trong nhóm chat Vi
 
 Trước khi bọc, phải strip mọi chuỗi trông giống thẻ đóng của chính mình ra khỏi nội dung chunk. Không làm bước này thì một tài liệu chứa `</tai_lieu>` sẽ tự thoát khỏi hộp — và đó chính xác là cách người ta phá.
 
-### 7.3 Ngân sách token (cap cứng, cưỡng chế trong `budget.ts`)
+### 7.3 Ngân sách token (cap cứng, cưỡng chế trong `budget.py`)
 
 **Sửa 05/09/2026.** Bảng cũ (tổng ~4000 token) tính cho giá Opus 5. `gpt-5-mini` có cửa sổ **400.000
 token** và input rẻ hơn 20 lần, nên cắt bớt ngữ cảnh là đánh đổi chất lượng câu trả lời lấy vài xu.
@@ -555,7 +626,7 @@ Các con số dưới đây là **cầu dao**, không phải chính sách — tr
 
 Cột "Cache" bị bỏ: xem §8.3, caching không còn là lý do để định hình prompt.
 
-Vượt trần thì **cắt đúng tầng đó**, không đụng tầng khác. `budget.ts` trả về cả phần đã bị cắt để ghi
+Vượt trần thì **cắt đúng tầng đó**, không đụng tầng khác. `budget.py` trả về cả phần đã bị cắt để ghi
 log — một lần cắt giờ là **tín hiệu bất thường cần xem**, không phải chuyện thường ngày.
 
 Cầu dao vẫn tồn tại vì ở 400.000 token thì một request tốn ~$0,10: một tài liệu dài lọt vào prompt là
@@ -574,7 +645,7 @@ Cầu dao vẫn tồn tại vì ở 400.000 token thì một request tốn ~$0,1
 | `summarize` | `gpt-5-mini` | `low` | 4000 | Async |
 | `extract-facts` | `gpt-5-mini` | `low` | 4000 | Async, structured output |
 
-Bốn dòng này nằm **duy nhất** ở `llm/models.ts`. Không rải model ID khắp code.
+Bốn dòng này nằm **duy nhất** ở `llm/models.py`. Không rải model ID khắp code.
 
 Các cap trên rộng hơn độ dài văn bản mong đợi rất nhiều **là có chủ đích**: token reasoning tính vào
 `max_completion_tokens`. Cap 200 cho `rewrite` gần như chắc chắn trả về chuỗi rỗng.
@@ -593,7 +664,7 @@ nhận tham số `dimensions` để cắt về đúng 1024.
 
 Hệ quả với cấu trúc: `EmbedderPort` và `RerankerPort` là **port thật**, có ít nhất hai implementation từ ngày đầu (thật + fake cho test). Đổi nhà cung cấp = viết một file trong `llm/`, không phải sửa `knowledge/`.
 
-Ràng buộc cứng: số chiều model phải khớp `VECTOR(1024)`. `main/container.ts` kiểm tra lúc khởi động:
+Ràng buộc cứng: số chiều model phải khớp `VECTOR(1024)`. `main/container.py` kiểm tra lúc khởi động:
 
 ```ts
 // Đọc atttypmod của cột embedding từ pg_attribute, so với config.embedding.dim.
@@ -624,11 +695,24 @@ reasoning   500 × $2,00/1M  = $0,001000   <- tinh gia OUTPUT
 có. Phải đo bằng `usage_log` (`completion_tokens_details.reasoning_tokens`) rồi mới chốt
 `DAILY_BUDGET_USD`, đừng tin con số ước lượng ở trên.
 
-**Prompt caching giờ gần như không đáng kể.** Ngưỡng tối thiểu của OpenAI là 1024 token (GPT-5.6 trở
-lên) hoặc **2048 token (model cũ hơn, gồm `gpt-5-mini`)**, và phần được cache phải là **tiền tố giống
-nhau** giữa các request. System prompt chỉ ~620 token nên không đạt ngưỡng. Muốn đạt thì phải phình nó
-lên hơn 2048 token — làm prompt tệ đi để tiết kiệm $0,0009 mỗi câu. Không đáng. §7.1 vẫn là luật, nhưng
-lý do bây giờ là **tính xác định của prompt**, không phải tiền.
+**Prompt caching ĐANG ăn** — đo từ `usage_log`, không suy đoán:
+
+```
+20 / 32 lan goi co cache hit    cache_read_tokens: 1408 - 1792
+SYSTEM_PROMPT: 1539 token       OpenAI chia cache theo block 128 token
+1408 = 11 x 128                 -> phan duoc cache CHINH LA system prompt
+```
+
+Bản trước của mục này viết *"caching gần như không đáng kể, system prompt chỉ ~620 token nên không đạt
+ngưỡng 2048"*. **Sai cả ba số.** System prompt là 1539 token, cache hit thấp nhất quan sát được là 1408,
+nên ngưỡng thực tế nằm dưới mức đó. Kết luận rút ra từ tiền đề sai đó cũng phải rút lại.
+
+Hệ quả: §7.1 (*"system prompt là hằng số"*) giờ có **hai** lý do chứ không phải một — tính tái lập, **và
+tiền**. Input được cache tính $0,025/1M thay vì $0,25/1M, tức rẻ hơn 10 lần trên phần lớn nhất của prompt.
+Đổi một byte ở đầu chuỗi là mất cache của toàn bộ phần sau.
+
+12/32 lượt không có cache là lượt **đầu tiên của một tiền tố** (lần đó là cache *write*) hoặc lượt sau
+một quãng nghỉ dài. Đó là hành vi bình thường, không phải hỏng.
 
 Suy ra: ngưỡng rate limit global và `cost:day` vẫn phải tính ngược từ ngân sách bạn chấp nhận — chỉ là
 ngân sách đó giờ mua được nhiều hơn 10 lần.
@@ -637,15 +721,13 @@ ngân sách đó giờ mua được nhiều hơn 10 lần.
 
 ## 9. Lỗi và fallback
 
-```ts
-// agents/domain/errors.ts
-type BotError =
-  | { kind: 'rate_limited';     retryAfterMs: number }
-  | { kind: 'budget_exceeded' }
-  | { kind: 'not_allowed' }
-  | { kind: 'upstream_timeout'; service: 'llm' | 'embed' | 'rerank' | 'db' }
-  | { kind: 'upstream_error';   service: string; status?: number }
-  | { kind: 'bad_payload';      detail: string };
+```python
+# agents/domain/errors.py — lỗi là GIÁ TRỊ, không phải exception.
+# Một lỗi upstream là kết quả bình thường của đường ống (có câu fallback, có quyết
+# định retry), không phải sự cố bất thường. Exception vẫn dùng cho lỗi lập trình.
+BotError: TypeAlias = (
+    RateLimited | BudgetExceeded | NotAllowed | UpstreamTimeout | UpstreamError | BadPayload
+)
 ```
 
 | Lỗi | Hành vi trong nhóm | Retry job? |
@@ -665,15 +747,15 @@ type BotError =
 
 | Tầng | Ở đâu | Chạy khi nào | Yêu cầu |
 |---|---|---|---|
-| Unit | `test/unit` — chỉ `agents/` | mọi commit | Không I/O, < 2s. Đây là lý do tồn tại của ports. |
-| Contract | `test/contract` — adapter ăn fixtures thật | mọi commit | Ghi payload thật một lần, dùng mãi. Zalo đổi payload → test đỏ, không phải prod đỏ. |
-| Integration | `test/integration` — testcontainers | mọi PR | Postgres+pgvector, Redis thật |
+| Unit | `tests/unit` — chỉ `agents/` | mọi commit | Không I/O, < 2s. Đây là lý do tồn tại của ports. |
+| Contract | `tests/contract` — adapter ăn fixtures thật | mọi commit | Ghi payload thật một lần, dùng mãi. Zalo đổi payload → test đỏ, không phải prod đỏ. |
+| Integration | `tests/integration` — testcontainers | mọi PR | Postgres+pgvector, Redis thật |
 | Eval | `evals/` — 50 câu | khi đổi prompt / chunking / model | Recall@5 > 0.85, faithfulness > 0.9, p95 < 5s |
 
 **Test không được phép xoá:**
 
 ```ts
-// test/security/cross-thread-leak.test.ts
+# tests/security/test_cross_thread_leak.py
 // Ghi fact ở thread A → truy vấn từ thread B qua MỌI phương thức public của MemoryPort
 //   → phải rỗng, không trừ phương thức nào.
 // Fact đã revoke → không xuất hiện trong prompt cuối cùng (kiểm tra trên chuỗi đã build,
@@ -699,20 +781,20 @@ Master plan viết "ngày 1 nộp Meta App Review". Ngày 1 bạn chưa có gì 
 
 Zalo Bot Platform vẫn đứng trước Messenger vì không cần duyệt gì và validate agents sớm nhất — điểm này plan v2 đã đúng, giữ nguyên.
 
-**Definition of Done mỗi tuần:** dependency-cruiser xanh + test tầng tương ứng xanh + ít nhất một mục trong checklist go-live được tick. Không có khái niệm "gần xong".
+**Definition of Done mỗi tuần:** `lint-imports` + hai guard + canary xanh + test tầng tương ứng xanh + ít nhất một mục trong checklist go-live được tick. Không có khái niệm "gần xong".
 
 ---
 
 ## 12. Cấu hình
 
-`.env.example` — mọi biến đều khai trong `config/schema.ts`; thiếu một biến là process **không khởi động được** (fail fast, không fail lúc 2 giờ sáng).
+`.env.example` — mọi biến đều khai trong `config/schema.py`; thiếu một biến là process **không khởi động được** (fail fast, không fail lúc 2 giờ sáng).
 
 ```ini
 NODE_ENV=production
 LOG_LEVEL=info
 
-ANTHROPIC_API_KEY=
-EMBEDDING_PROVIDER=            # nhà cung cấp bạn chọn (không phải Anthropic)
+OPENAI_API_KEY=
+EMBEDDING_PROVIDER=            # nhà cung cấp bạn chọn ('fake' cho tới GĐ 6)
 EMBEDDING_API_KEY=
 EMBEDDING_MODEL=
 EMBEDDING_DIM=1024             # PHẢI khớp cột VECTOR(n); kiểm tra lúc khởi động
@@ -749,7 +831,7 @@ DAILY_BUDGET_USD=              # BẮT BUỘC — không có mặc định, bạ
 Ghi ra để sau này không ai tưởng là quên:
 
 - **Không có microservice.** Một service, ba process. Tách service khi có đội, không phải khi có sơ đồ.
-- **Không có framework DI.** `container.ts` là một hàm trả về object. Nhìn là biết cái gì nối vào cái gì.
+- **Không có framework DI.** `container.py` là một hàm trả về object. Nhìn là biết cái gì nối vào cái gì.
 - **Không có ORM.** SQL viết tay + migration đánh số. RAG và memory là truy vấn vector/tsvector — ORM chỉ cản đường.
 - **Không xử lý `attachments`.** Trường này có trong contract của plan nhưng không nơi nào trong 3 file định nghĩa hành vi. Giữ trường lại, hành vi Phase 1 là: bỏ qua và trả lời "mình chưa xem được ảnh". Không để trường chết.
 - **Chưa có `zalo-personal/`.** Chỉ tạo thư mục khi Bot Platform thật sự không đáp ứng được nhóm. Tạo sớm là mời gọi dùng sớm.

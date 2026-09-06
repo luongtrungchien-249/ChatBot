@@ -1,5 +1,11 @@
 # Kế hoạch triển khai AI Chatbot cho Zalo & Messenger
 
+> **Tài liệu lưu trữ — giữ nguyên như lúc viết, không sửa theo hiện trạng.**
+> Bản này ra đời trước khi dự án chốt kiến trúc và trước khi chuyển sang Python; phần stack, tên file
+> và ước lượng chi phí trong đây **đã lỗi thời**. Nó được giữ lại để tra cứu *lập luận* đã dẫn tới các
+> quyết định, không phải để làm theo. Bản đang có hiệu lực: `ARCHITECTURE.md` và
+> `docs/plan-thi-cong.md`.
+
 **Vai trò:** Senior AI Engineer
 **Mục tiêu:** Một bot trả lời khi được mention (`@nam_chatbot`) trong nhóm chat Zalo và Messenger.
 **Phiên bản:** 2 — đã bổ sung Zalo Bot Platform

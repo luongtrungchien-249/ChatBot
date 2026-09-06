@@ -1,0 +1,10 @@
+{
+  "message": {
+    "from": { "id": "a1b2c3d4e5f60718293a", "display_name": "Chiến", "is_bot": false },
+    "chat": { "id": "zgr-0000000000000000aaaa", "chat_type": "GROUP" },
+    "text": "@Bot CP Assistant xin chào",
+    "message_id": "7f0dee73c8d95d8004cf",
+    "date": 1788693951000
+  },
+  "event_name": "message.text.received"
+}

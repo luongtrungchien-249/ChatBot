@@ -1,0 +1,10 @@
+{
+  "message": {
+    "from": { "id": "6ede9afa66b88fe6d6a9", "display_name": "Ted", "is_bot": false },
+    "chat": { "id": "6ede9afa66b88fe6d6a9", "chat_type": "PRIVATE" },
+    "text": "Xin chào",
+    "message_id": "2d758cb5e222177a4e35",
+    "date": 1750316131602
+  },
+  "event_name": "message.text.received"
+}

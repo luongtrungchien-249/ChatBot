@@ -1,0 +1,81 @@
+# Cuong che 8 luat kien truc trong ARCHITECTURE.md section 1.
+# Chay: uv run lint-imports   (bat buoc trong CI)
+#
+# Moi luat phai duoc CHUNG MINH bang canary vi pham co y — xem ops/canary_import_rules.py
+# va docs/dep-rules-verified.md. Mot luat viet sai van chay xanh; no chi don gian
+# khong bat duoc gi.
+
+[importlinter]
+# Muoi goi cap cao nhat, moi goi la mot TANG. Khong co goi bao boc ngoai, nen phai
+# liet ke tung cai o day — them mot tang moi thi nho them vao danh sach nay, neu
+# khong luat se im lang bo qua ca tang do.
+root_packages =
+    adapters
+    agents
+    config
+    infra
+    knowledge
+    llm
+    main
+    memory
+    shared
+    tools
+
+[importlinter:contract:1]
+name = L1: agents khong biet ha tang
+type = forbidden
+source_modules =
+    agents
+forbidden_modules =
+    adapters
+    infra
+    llm
+    memory
+    knowledge
+    tools
+
+# L7 (chi config duoc cham bien moi truong) KHONG kiem duoc bang import-linter:
+# no so khop IMPORT MODULE, con os.environ la truy cap THUOC TINH. Luat do duoc
+# cuong che boi ops/guard_env.py, chay trong CI cung voi lint-imports.
+#
+# Tuong tu, L4 co hai nua: nua "khong import fact_repo" o hop dong 5 duoi day, va
+# nua "khong viet SQL cham bang memory_fact" o ops/guard_sql.py.
+
+[importlinter:contract:2]
+name = L1: agents khong doc config
+type = forbidden
+source_modules =
+    agents
+forbidden_modules =
+    config
+
+[importlinter:contract:3]
+name = L5: moi adapter la mot hop kin
+type = independence
+modules =
+    adapters.cli
+    adapters.web
+    adapters.zalo_bot
+    adapters.messenger
+
+[importlinter:contract:4]
+name = L5: adapter khong goi LLM, khong doc memory hay knowledge
+type = forbidden
+source_modules =
+    adapters
+forbidden_modules =
+    llm
+    memory
+    knowledge
+
+[importlinter:contract:5]
+name = L4: chi memory.repository duoc cham bang memory_fact
+type = forbidden
+source_modules =
+    agents
+    adapters
+    knowledge
+    tools
+    infra
+forbidden_modules =
+    memory.repository.fact_repo

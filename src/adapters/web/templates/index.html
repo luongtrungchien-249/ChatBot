@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ bot_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <button class="new-chat" id="new-chat">+ Cuộc trò chuyện mới</button>
+        <div class="section-label">Gần đây</div>
+        <nav class="thread-list" id="thread-list"></nav>
+        <div class="brand">{{ bot_name }}</div>
+      </aside>
+
+      <main class="main">
+        <div class="hero" id="hero"><h1>Hôm nay bạn cần gì?</h1></div>
+
+        <div class="messages" id="messages" hidden>
+          <div id="message-list"></div>
+          <div class="steps" id="steps" hidden></div>
+          <div id="bottom"></div>
+        </div>
+
+        <div class="error" id="error" hidden></div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <input id="draft" placeholder="Hỏi bất cứ điều gì" autofocus />
+          <button type="submit" id="send" disabled>Gửi</button>
+          <button type="button" id="stop" class="stop" hidden>Dừng</button>
+        </form>
+      </main>
+    </div>
+
+    <script src="{{ url_for('static', path='app.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "result": {
+    "id": "0000000000000000000",
+    "account_name": "bot.XxXxXxXx",
+    "account_type": "BASIC",
+    "can_join_groups": true,
+    "display_name": "Bot CP Assistant"
+  },
+  "error_code": 0
+}

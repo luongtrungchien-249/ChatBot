@@ -1,0 +1,99 @@
+[project]
+name = "cp-assistant"
+version = "0.1.0"
+description = "Chatbot AI tra loi khi duoc mention trong nhom Zalo va Messenger, co RAG va memory."
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",            # render giao dien web — thay React/Vite, khong con buoc build
+    "arq>=0.26",              # hang doi Redis async
+    "redis>=5.2",
+    "asyncpg>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6", # doc va kiem tra env mot lan luc khoi dong
+    "structlog>=24.4",
+    "openai>=1.55",
+    "httpx>=0.28",            # goi API cong cu (Tavily, OpenAlex, arXiv...)
+    # Windows khong co CSDL mui gio he thong; zoneinfo can goi nay, neu khong
+    # ZoneInfo("Asia/Ho_Chi_Minh") nem ZoneInfoNotFoundError ngay luc import.
+    "tzdata>=2024.2; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "import-linter>=2.1",     # cuong che 8 luat kien truc
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Muoi goi cap cao nhat, dung ten cua tung TANG kien truc (ARCHITECTURE.md section 3).
+# KHONG boc trong mot goi bao: ten tang chinh la thu nguoi doc code can thay dau tien,
+# va `from agents.ports.llm import LlmPort` noi ro hon `from cp_assistant.agents...`.
+#
+# Doi lai, cac ten nay chiem khong gian ten cap cao nhat, nen khi them phu thuoc moi
+# phai kiem xem no co goi cap cao nhat nao trung ten khong. Da kiem ngay 06/09/2026
+# voi toan bo cay phu thuoc hien tai: khong trung cai nao.
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/adapters",
+    "src/agents",
+    "src/config",
+    "src/infra",
+    "src/knowledge",
+    "src/llm",
+    "src/main",
+    "src/memory",
+    "src/shared",
+    "src/tools",
+]
+
+# --- Kiem tra kieu: chat nhat co the ---
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false   # can Any o ranh gioi JSON cua API ben ngoai
+files = ["src", "tests", "ops", "evals"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["arq.*", "asyncpg.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Prompt la NOI DUNG, khong phai code: ngat dong lai se doi chinh chuoi model doc,
+# tuc doi hanh vi bot ma khong ai nhan ra. Do dai dong o day khong co y nghia gi.
+"src/agents/prompt/system.py" = ["E501"]
+"src/agents/prompt/instructions.py" = ["E501"]
+# Ten test viet hoa mot tu de nhan manh dieu dang duoc khang dinh: trong tieng Viet
+# khong dau, "khong" lot giua mot ten dai rat de doc luot qua — ma doc nham "KHONG
+# im lang" thanh "im lang" la hieu nguoc han y nghia cua test. Day la van xuoi cho
+# nguoi doc bao cao loi, khong phai API ai goi.
+"tests/**" = ["N802"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# MOT event loop cho ca lan chay. Mac dinh la mot loop MOI cho moi test, ma pool
+# Postgres lai la bien toan cuc trong infra/db.py — hai thu do cong lai thanh mot
+# cuoc dua lam test do lac loi. Xem tests/conftest.py.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# Unit test KHONG duoc cham Postgres, Redis hay API key. Do la ly do ton tai cua
+# agents/ports — xem ARCHITECTURE.md luat L2.
+addopts = "-q"
