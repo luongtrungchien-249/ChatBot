@@ -17,8 +17,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from agents.domain.thread import ThreadScope, user_subject
-from config import get_settings
-from infra.db import execute, fetch
+from infra.db import execute
 from memory.repository import fact_repo
 
 NAM = user_subject("nam")
@@ -26,18 +25,7 @@ LAN = user_subject("lan")
 
 
 @pytest.fixture
-async def san_sang() -> AsyncIterator[None]:
-    if get_settings().EMBEDDING_PROVIDER.lower() != "openai":
-        pytest.skip("EMBEDDING_PROVIDER khong phai 'openai' — embedder gia lam test vo nghia")
-    try:
-        await fetch("SELECT 1")
-    except Exception as error:
-        pytest.skip(f"khong co Postgres: {error}")
-    yield
-
-
-@pytest.fixture
-async def thread(san_sang: None) -> AsyncIterator[ThreadScope]:
+async def thread(embedding_that: None) -> AsyncIterator[ThreadScope]:
     scope = ThreadScope(platform="cli", thread_id=f"it-fact-{uuid.uuid4()}")
     yield scope
     await execute(

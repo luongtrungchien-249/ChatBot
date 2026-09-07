@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from agents.domain.thread import ThreadScope
-from infra.db import execute, fetch
+from infra.db import execute
 from memory.repository.summary_repo import (
     Summary,
     commit_summary,
@@ -23,15 +23,6 @@ from memory.repository.summary_repo import (
     get_summary,
     oldest_pending,
 )
-
-
-@pytest.fixture
-async def postgres_san_sang() -> AsyncIterator[None]:
-    try:
-        await fetch("SELECT 1")
-    except Exception as error:
-        pytest.skip(f"khong co Postgres: {error}")
-    yield
 
 
 @pytest.fixture

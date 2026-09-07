@@ -11,7 +11,6 @@ Chay: docker compose -f ops/docker-compose.yml up -d redis && uv run pytest test
 
 import time
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any, cast
 
 import pytest
@@ -20,15 +19,6 @@ from agents.domain.thread import ThreadScope
 from agents.ports.ratelimit import Allowed, Denied
 from infra.ratelimit import _BUCKET_SCRIPT, RedisRateLimit, bucket_args
 from infra.redis_client import aw, get_redis
-
-
-@pytest.fixture
-async def redis_san_sang() -> AsyncIterator[None]:
-    try:
-        await aw(get_redis().ping())
-    except Exception as error:
-        pytest.skip(f"khong co Redis: {error}")
-    yield
 
 
 def scope_moi() -> ThreadScope:

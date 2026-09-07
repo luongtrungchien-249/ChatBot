@@ -8,6 +8,73 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # Thieu hai service nay thi 40 test tu bo qua — trong do co CA BAY test
+    # cross-thread-leak, lop chan ro ri memory giua cac nhom. Ma bo qua van cho ra
+    # bao cao mau xanh, nen lo hong khong bao gio lo ra. tests/conftest.py doi
+    # nghia cua "bo qua" thanh "DO" khi thay bien CI.
+    services:
+      postgres:
+        # PHAI la ban co pgvector: memory_fact.embedding la cot VECTOR(1024), va
+        # postgres:16 tran khong co extension do -> migration 0001 se hong.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bot
+          POSTGRES_PASSWORD: bot
+          POSTGRES_DB: chatbot
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bot -d chatbot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    # --- ENV GIA ---
+    # config/schema.py bat buoc mot loat bien khong co gia tri mac dinh, va `.env`
+    # nam trong .gitignore. Thieu chung thi Settings() nem loi validation ngay lan
+    # doc dau tien va MOI test cham config deu hong — khong lien quan gi toi logic.
+    #
+    # Gia tri o day KHONG duoc coi la nguon su that cho cau hinh that; chung chi du
+    # de process khoi dong. `.env.example` moi la ban mau cho nguoi dung.
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: warn
+
+      # Tro thang vao service o tren. GitHub map cong ra localhost cua runner.
+      DATABASE_URL: postgres://bot:bot@localhost:5432/chatbot
+      REDIS_URL: redis://localhost:6379
+
+      # Chua dung RAG: rerank de 'fake' cho qua duoc validation min_length=1.
+      RERANK_PROVIDER: fake
+      RERANK_API_KEY: fake
+      RERANK_MODEL: fake
+      RERANK_MIN_SCORE: '0.35'
+
+      # PHAI khop VECTOR(1024) trong db/migrations/0004_knowledge_1024.sql.
+      EMBEDDING_MODEL: text-embedding-3-large
+      EMBEDDING_DIM: '1024'
+
+      # Co secret thi 23 test dung embedding THAT duoc chay; khong co thi chung bo
+      # qua kem mot canh bao hien tren tab Summary (xem tests/conftest.py).
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-ci-khong-co-khoa-that' }}
+      EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-ci-khong-co-khoa-that' }}
+      EMBEDDING_PROVIDER: ${{ secrets.OPENAI_API_KEY && 'openai' || 'fake' }}
+
+      # Ten bot: nguon su that la .env.example — test doc thang tu do de bat truong
+      # hop system prompt va danh sach ten troi khoi nhau. Dat o day chi de
+      # Settings() khoi nem loi.
+      BOT_MENTION_NAME: CP_Assistant,CP,Bot_CP_Assistant
+      DAILY_BUDGET_USD: '1'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -48,5 +115,12 @@ jobs:
       - name: Canary — chung minh 8 luat con song
         run: uv run python ops/canary_import_rules.py
 
-      - name: Unit test
+      # Bang trong thi test tich hop do o cau SELECT dau tien. Chay hai lan de
+      # kiem luon tinh bat bien: lan hai phai khong lam gi.
+      - name: Migrate (chay hai lan — lan hai phai khong lam gi)
+        run: |
+          uv run python -m main.cli migrate
+          uv run python -m main.cli migrate
+
+      - name: Test — unit, contract, integration, security
         run: uv run pytest

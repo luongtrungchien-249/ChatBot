@@ -22,8 +22,7 @@ from agents.domain.message import StoredMessage
 from agents.domain.thread import ThreadScope, user_subject
 from agents.ports.memory import NewMessage
 from agents.prompt.context import ContextInput, build_context
-from config import get_settings
-from infra.db import execute, fetch
+from infra.db import execute
 from memory.repository import fact_repo
 from memory.repository.message_repo import message_repo
 from memory.repository.summary_repo import commit_summary
@@ -45,18 +44,7 @@ class GhiLog:
 
 
 @pytest.fixture
-async def san_sang() -> AsyncIterator[None]:
-    if get_settings().EMBEDDING_PROVIDER.lower() != "openai":
-        pytest.skip("EMBEDDING_PROVIDER khong phai 'openai' — embedder gia lam test vo nghia")
-    try:
-        await fetch("SELECT 1")
-    except Exception as error:
-        pytest.skip(f"khong co Postgres: {error}")
-    yield
-
-
-@pytest.fixture
-async def hai_thread(san_sang: None) -> AsyncIterator[tuple[ThreadScope, ThreadScope]]:
+async def hai_thread(embedding_that: None) -> AsyncIterator[tuple[ThreadScope, ThreadScope]]:
     """Thread A co du lieu nhay cam. Thread B phai KHONG thay gi cua A."""
     a = ThreadScope(platform="cli", thread_id=f"sec-a-{uuid.uuid4()}")
     b = ThreadScope(platform="cli", thread_id=f"sec-b-{uuid.uuid4()}")
