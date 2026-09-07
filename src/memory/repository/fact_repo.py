@@ -249,6 +249,46 @@ async def _revoke(scope: ThreadScope, fact_ids: list[str], revoked_by: str) -> i
     return _rows_affected(status)
 
 
+async def cho_duyet(scope: ThreadScope) -> list[Fact]:
+    """Fact bot TU GHI ma chua ai xem lai (human-on-the-loop).
+
+    Chi `source = 'implicit'`: fact explicit la do chinh nguoi dung noi ra, khong ai
+    phai duyet loi cua ho.
+
+    Sap theo thoi gian TANG DAN: cai cu nhat truoc, vi do la cai da nam trong prompt
+    lau nhat va da anh huong nhieu cau tra loi nhat.
+    """
+    rows = await fetch(
+        """SELECT id, subject_id, content, source, confidence, created_at
+             FROM memory_fact
+            WHERE platform = $1 AND thread_id = $2
+              AND source = 'implicit'
+              AND revoked_at IS NULL
+              AND reviewed_at IS NULL
+            ORDER BY created_at""",
+        scope.platform,
+        scope.thread_id,
+    )
+    return [_to_fact(r) for r in rows]
+
+
+async def danh_dau_da_duyet(scope: ThreadScope, fact_ids: list[str], boi: str) -> int:
+    """Danh dau da xem. KHONG doi noi dung fact — chi ghi lai rang co nguoi da nhin."""
+    if not fact_ids:
+        return 0
+    status = await execute(
+        """UPDATE memory_fact
+              SET reviewed_at = now(), reviewed_by = $4
+            WHERE platform = $1 AND thread_id = $2 AND id = ANY($3::bigint[])
+              AND reviewed_at IS NULL""",
+        scope.platform,
+        scope.thread_id,
+        [int(i) for i in fact_ids],
+        boi,
+    )
+    return _rows_affected(status)
+
+
 async def dump_thread(scope: ThreadScope) -> list[Fact]:
     """Cong cu AUDIT: moi fact con hieu luc cua ca mot thread, moi subject.
 

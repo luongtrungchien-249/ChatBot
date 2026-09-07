@@ -21,11 +21,11 @@ from infra.allowlist import allow_thread, deny_thread, list_threads
 from infra.db import close_db, execute, fetch, transaction
 from infra.http import close_http
 from infra.logger import configure_logging, get_logger
-from infra.metrics import budget_today, cache_stats, message_stats, route_stats
+from infra.metrics import budget_today, cache_stats, message_stats, route_stats, turn_stats
 from infra.redis_client import close_redis
 from knowledge.ingest.extract import SUPPORTED, UnsupportedDocumentError
 from knowledge.ingest.pipeline import ingest_file
-from memory.repository.fact_repo import dump_thread
+from memory.repository.fact_repo import cho_duyet, danh_dau_da_duyet, dump_thread, revoke
 
 from .container import build_deps
 
@@ -247,6 +247,18 @@ async def stats_command(args: list[str]) -> int:
           f"{sum(r.errors for r in routes):>5}{'':>28}"
           f"{sum(r.cost_usd for r in routes):>10.4f}")
 
+    turns = await turn_stats(days)
+    if turns:
+        print("\nDo tre CA LUOT (thu nguoi dung cam nhan), muc tieu trong ngoac:")
+        for t in turns:
+            nhan = "co tra cuu" if t.used_tools else "khong tra cuu"
+            muc_tieu = 15_000 if t.used_tools else 5_000
+            dat = "DAT " if t.p95_ms < muc_tieu else "TRUOT"
+            print(
+                f"  {dat} {nhan:<14}{t.turns:>4} luot   "
+                f"p50 {t.p50_ms:>6}ms   p95 {t.p95_ms:>6}ms   (muc tieu p95 < {muc_tieu}ms)"
+            )
+
     cache = await cache_stats(days)
     if cache.total_calls:
         ti_le = cache.calls_with_cache / cache.total_calls * 100
@@ -270,6 +282,63 @@ async def stats_command(args: list[str]) -> int:
     return 0
 
 
+async def review_command(args: list[str]) -> int:
+    """`review <platform> <thread_id> [ok|bo] [so...]` — duyet SAU fact bot tu ghi.
+
+    Day la lop duyet cua human-ON-the-loop: bot da ghi roi, nguoi xem lai va bo cai
+    sai. Xem agents/policy/autonomy.py de biet vi sao la "on" chu khong phai "in".
+
+    L3 implicit tat tu Giai doan 7 voi mot ly do ghi thang trong code: no ghi thong
+    tin ve NGUOI CO TEN ma khong ai bam nut dong y. Dieu kien de bat khong phai them
+    mot lop chan (ba lop da co) ma la NHIN THAY duoc bot da ghi gi. Lenh nay la cai do.
+    """
+    if len(args) < 2 or args[0] not in _PLATFORMS:
+        print("Dung: review <platform> <thread_id> [ok|bo] [so...]", file=sys.stderr)
+        print(f"platform: {' | '.join(_PLATFORMS)}", file=sys.stderr)
+        return 1
+
+    platform: Platform = args[0]
+    scope = ThreadScope(platform=platform, thread_id=args[1])
+    lenh = args[2] if len(args) > 2 else "xem"
+
+    facts = await cho_duyet(scope)
+    if not facts:
+        print("Khong co fact tu dong nao dang cho duyet.")
+        return 0
+
+    if lenh == "xem":
+        print(f"{len(facts)} fact bot TU GHI, chua ai xem lai:\n")
+        for i, f in enumerate(facts, start=1):
+            khi = f.created_at.strftime("%Y-%m-%d %H:%M")
+            print(f"  {i}. [{f.subject_id}] {f.content}")
+            print(f"     tin cay {f.confidence:.2f}, ghi luc {khi}")
+        print("\n  review ... ok        danh dau da xem TAT CA")
+        print("  review ... ok 1 3    chi danh dau so 1 va 3")
+        print("  review ... bo 2      XOA so 2 (soft delete, khong khoi phuc duoc)")
+        return 0
+
+    if lenh not in ("ok", "bo"):
+        print(f"Lenh khong biet: {lenh}. Co: ok | bo", file=sys.stderr)
+        return 1
+
+    # So thu tu bat dau tu 1; khong co so nao = tat ca.
+    so = [int(x) for x in args[3:] if x.isdigit()]
+    chon = [facts[n - 1] for n in so if 1 <= n <= len(facts)] if so else facts
+    if not chon:
+        print("Khong so nao nam trong danh sach.", file=sys.stderr)
+        return 1
+
+    boi = f"cli:{getpass.getuser()}"
+    ids = [f.id for f in chon]
+    if lenh == "ok":
+        n = await danh_dau_da_duyet(scope, ids, boi)
+        print(f"Da danh dau {n} fact la da xem.")
+    else:
+        n = await revoke(scope, ids, revoked_by=boi)
+        print(f"Da xoa {n} fact. Chung khong con vao prompt nua.")
+    return 0
+
+
 async def main() -> int:
     configure_logging()
     command = sys.argv[1] if len(sys.argv) > 1 else "chat"
@@ -287,10 +356,12 @@ async def main() -> int:
             return await ingest_command(sys.argv[2:])
         elif command == "stats":
             return await stats_command(sys.argv[2:])
+        elif command == "review":
+            return await review_command(sys.argv[2:])
         else:
             print(
                 f"Lenh khong biet: {command}. "
-                "Co: migrate | chat | allow | deny | allowed | memory | ingest | stats",
+                "Co: migrate | chat | allow | deny | allowed | memory | review | ingest | stats",
                 file=sys.stderr,
             )
             return 1

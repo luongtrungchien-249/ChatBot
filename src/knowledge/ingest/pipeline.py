@@ -13,6 +13,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents.policy.injection import detect_injection
 from infra.db import fetch, transaction
 from infra.logger import get_logger
 from llm.embedder import get_embedder
@@ -93,6 +94,21 @@ async def ingest_file(path: Path, ingested_by: str, title: str | None = None) ->
     chunks = chunk_document(text)
     if not chunks:
         raise ValueError(f"{path} khong cat duoc chunk nao")
+
+    # INPUT RAILS cho tai lieu. Mot tep co cau ra lenh nhung se nam trong CSDL vector
+    # va duoc keo vao prompt o MOI cau hoi lien quan — nguy hiem hon mot tin nhan, vi
+    # no lap lai mai. Ghi nhan, khong chan: quyen quyet dinh thuoc ve nguoi nap, va ho
+    # can biet de xem lai tep truoc khi de no phuc vu ca nhom.
+    dang_ngo = [(c.ord, detect_injection(c.content)) for c in chunks]
+    dang_ngo = [(o, q) for o, q in dang_ngo if q.suspicious]
+    if dang_ngo:
+        _log.warning(
+            "tai lieu chua doan giong chi thi cho tro ly — VAN NAP, hay xem lai",
+            title=doc_title,
+            so_chunk=len(dang_ngo),
+            vi_tri=[o for o, _ in dang_ngo][:10],
+            mau=sorted({m for _, q in dang_ngo for m in q.patterns}),
+        )
 
     embed_inputs = [contextualize(c, doc_title) for c in chunks]
     vectors: list[list[float]] = []
