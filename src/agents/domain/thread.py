@@ -7,7 +7,9 @@ Ly do: khong ai quen tham so thu hai cua mot object ca.
 from dataclasses import dataclass
 from typing import Literal
 
-Platform = Literal["zalo_bot", "zalo_personal", "messenger", "cli", "web"]
+#: Messenger da bi bo khoi pham vi (07/09/2026) — chi tich hop Zalo. Giu lai
+#: `zalo_personal` vi no van la duong du phong neu Bot Platform khong du cho nhom.
+Platform = Literal["zalo_bot", "zalo_personal", "cli", "web"]
 
 
 @dataclass(frozen=True, slots=True)

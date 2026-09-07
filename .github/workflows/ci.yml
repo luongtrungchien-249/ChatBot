@@ -63,8 +63,12 @@ jobs:
       EMBEDDING_MODEL: text-embedding-3-large
       EMBEDDING_DIM: '1024'
 
-      # Co secret thi 23 test dung embedding THAT duoc chay; khong co thi chung bo
-      # qua kem mot canh bao hien tren tab Summary (xem tests/conftest.py).
+      # Co secret thi cac test dung embedding THAT duoc chay (fact_repo,
+      # cross-thread-leak, va phan ngu nghia cua RAG); khong co thi chung bo qua kem
+      # mot canh bao hien tren tab Summary (xem tests/conftest.py).
+      #
+      # Phan KHONG can khoa van chay day du: nap tai lieu, phien ban, va duong
+      # lexical (BM25 qua vn_tsv) — do la nhung thu chi Postgres that moi kiem duoc.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-ci-khong-co-khoa-that' }}
       EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-ci-khong-co-khoa-that' }}
       EMBEDDING_PROVIDER: ${{ secrets.OPENAI_API_KEY && 'openai' || 'fake' }}
@@ -117,6 +121,9 @@ jobs:
 
       # Bang trong thi test tich hop do o cau SELECT dau tien. Chay hai lan de
       # kiem luon tinh bat bien: lan hai phai khong lam gi.
+      #
+      # 0008 doi cot sinh `kb_chunk.tsv` — mot migration DROP roi ADD COLUMN. Chay
+      # hai lan la cach re nhat de bat truong hop no khong bat bien.
       - name: Migrate (chay hai lan — lan hai phai khong lam gi)
         run: |
           uv run python -m main.cli migrate

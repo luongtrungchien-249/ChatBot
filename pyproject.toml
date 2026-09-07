@@ -1,7 +1,7 @@
 [project]
 name = "cp-assistant"
 version = "0.1.0"
-description = "Chatbot AI tra loi khi duoc mention trong nhom Zalo va Messenger, co RAG va memory."
+description = "Chatbot AI tra loi khi duoc mention trong nhom Zalo, co RAG va memory."
 requires-python = ">=3.11"
 
 dependencies = [
@@ -19,6 +19,10 @@ dependencies = [
     # Windows khong co CSDL mui gio he thong; zoneinfo can goi nay, neu khong
     # ZoneInfo("Asia/Ho_Chi_Minh") nem ZoneInfoNotFoundError ngay luc import.
     "tzdata>=2024.2; sys_platform == 'win32'",
+    # Doc tai lieu de nap vao RAG (Giai doan 6). Ten goi cap cao nhat cua chung la
+    # `pypdf`, `docx` va `lxml` — da kiem, khong trung tang nao trong src/.
+    "pypdf>=6.17.0",
+    "python-docx>=1.2.0",
 ]
 
 [dependency-groups]
@@ -39,8 +43,9 @@ build-backend = "hatchling.build"
 # va `from agents.ports.llm import LlmPort` noi ro hon `from cp_assistant.agents...`.
 #
 # Doi lai, cac ten nay chiem khong gian ten cap cao nhat, nen khi them phu thuoc moi
-# phai kiem xem no co goi cap cao nhat nao trung ten khong. Da kiem ngay 06/09/2026
-# voi toan bo cay phu thuoc hien tai: khong trung cai nao.
+# phai kiem xem no co goi cap cao nhat nao trung ten khong. Da kiem lai ngay
+# 07/09/2026 voi toan bo cay phu thuoc hien tai (gom pypdf, python-docx, lxml):
+# khong trung cai nao.
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/adapters",
@@ -65,7 +70,7 @@ files = ["src", "tests", "ops", "evals"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["arq.*", "asyncpg.*"]
+module = ["arq.*", "asyncpg.*", "docx.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
@@ -80,6 +85,10 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 # tuc doi hanh vi bot ma khong ai nhan ra. Do dai dong o day khong co y nghia gi.
 "src/agents/prompt/system.py" = ["E501"]
 "src/agents/prompt/instructions.py" = ["E501"]
+# Cung ly do: instruction cua nguoi cham eval la NOI DUNG. Ngat dong lai la doi
+# chuoi model doc, tuc la doi cach cham diem — va diem cua hai lan chay khong con
+# so sanh duoc voi nhau.
+"evals/metrics/faithfulness.py" = ["E501"]
 # Ten test viet hoa mot tu de nhan manh dieu dang duoc khang dinh: trong tieng Viet
 # khong dau, "khong" lot giua mot ten dai rat de doc luot qua — ma doc nham "KHONG
 # im lang" thanh "im lang" la hieu nguoc han y nghia cua test. Day la van xuoi cho

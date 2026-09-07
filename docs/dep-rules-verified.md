@@ -12,7 +12,7 @@ Script tạo file vi phạm, chạy công cụ tương ứng, kiểm tra nó **�
 
 **Chạy lại mỗi khi sửa `.importlinter` hoặc hai script guard.**
 
-## Kết quả — 2026-09-06
+## Kết quả — 2026-09-07
 
 Toàn bộ 8 luật bắt được vi phạm cố ý:
 
@@ -64,3 +64,14 @@ import ngược lên. Chiều phụ thuộc giờ là `config → agents`, đún
 `agents` không import `config`.
 
 Nếu chọn cách khoét lỗ, luật vẫn "xanh" mãi mãi và sẽ không bao giờ chặn được lần vi phạm thật tiếp theo.
+
+## Một hợp đồng hẹp lại — 07/09/2026
+
+Hợp đồng `L5: moi adapter la mot hop kin` từng liệt kê bốn adapter; `adapters.messenger`
+đã bị bỏ khỏi danh sách vì Messenger không còn nằm trong phạm vi dự án và gói đó đã bị xoá.
+
+Đây là chỗ dễ mắc một lỗi im lặng: `import-linter` **không** báo lỗi khi hợp đồng
+`independence` trỏ tới một module không tồn tại nếu module đó chỉ là tên trong danh
+sách — nó chỉ đơn giản kiểm ba adapter thay vì bốn, và vẫn in "KEPT". Nên bỏ một tầng
+khỏi dự án thì phải bỏ cả khỏi `.importlinter`, và chạy lại canary để chắc rằng phần
+còn lại của luật vẫn bắt được vi phạm. Đã chạy: 8/8 luật còn sống.

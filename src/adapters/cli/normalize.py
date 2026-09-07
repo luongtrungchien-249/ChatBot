@@ -1,7 +1,7 @@
 """Adapter thu BA. Cach duy nhat de lam Phase 0 khi chua co token Zalo/Meta.
 
 Day khong phai do choi: neu agents/ chi chay duoc khi co webhook that thi kien truc
-da sai tu dau. Cung dung lam adapter tham chieu — Zalo va Messenger phai chuan hoa
+da sai tu dau. Cung dung lam adapter tham chieu — Zalo va web phai chuan hoa
 ra DUNG hinh dang nay.
 """
 

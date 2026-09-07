@@ -68,20 +68,20 @@ class TestPollRong:
         seen: dict[str, float] = {}
 
         class Client:
-            def __init__(self, timeout: float, **_: object) -> None:
+            async def get(
+                self,
+                url: str,
+                params: dict[str, int] | None = None,
+                timeout: float = 0.0,
+            ) -> httpx.Response:
+                # Timeout gio di theo TUNG lan goi, khong nam o constructor cua client:
+                # ca process dung chung mot pool (infra/http.py), va mot vong long-poll
+                # 25 giay khong the ap dat timeout cua no len moi loi goi khac.
                 seen["timeout"] = timeout
-
-            async def __aenter__(self) -> "Client":
-                return self
-
-            async def __aexit__(self, *_: object) -> None:
-                return None
-
-            async def get(self, url: str, params: dict[str, int] | None = None) -> httpx.Response:
                 seen["poll"] = float((params or {}).get("timeout", 0))
                 return httpx.Response(200, json={"ok": True, "result": {}})
 
-        monkeypatch.setattr(httpx, "AsyncClient", Client)
+        monkeypatch.setattr(api, "get_http", lambda: Client())
         monkeypatch.setattr(api, "_url", lambda method: f"http://test/{method}")
 
         await api.get_updates(25)
@@ -96,17 +96,18 @@ class TestGioiHanDoDai:
 
 
 def _fake_get(monkeypatch: pytest.MonkeyPatch, body: dict[str, object]) -> None:
+    """Thay chinh cho ma adapter lay client ra.
+
+    Truoc day test vá thang `httpx.AsyncClient`. Cho noi do khong con: adapter goi
+    `get_http()` de lay pool dung chung cua ca process. Vá o cho cu thi test van xanh
+    trong khi code that di mot duong khac — va lan doi that su lam ba test do.
+    """
+
     class Client:
-        def __init__(self, **_: object) -> None: ...
-
-        async def __aenter__(self) -> "Client":
-            return self
-
-        async def __aexit__(self, *_: object) -> None:
-            return None
-
-        async def get(self, url: str, params: dict[str, int] | None = None) -> httpx.Response:
+        async def get(
+            self, url: str, params: dict[str, int] | None = None, timeout: float = 0.0
+        ) -> httpx.Response:
             return httpx.Response(200, json=body)
 
-    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    monkeypatch.setattr(api, "get_http", lambda: Client())
     monkeypatch.setattr(api, "_url", lambda method: f"http://test/{method}")

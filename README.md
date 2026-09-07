@@ -1,7 +1,10 @@
 # CP Assistant
 
-Chatbot AI tra loi khi duoc mention trong nhom Zalo va Messenger, co RAG va memory.
+Chatbot AI tra loi khi duoc mention trong nhom Zalo, co RAG va memory.
 Viet hoan toan bang **Python 3.11**.
+
+**Pham vi:** chi tich hop Zalo. Messenger da bi bo khoi ke hoach ngay 07/09/2026 —
+khong con code, bien cau hinh hay gia tri `Platform` nao cho no.
 
 ## Tai lieu
 
@@ -46,11 +49,16 @@ build, khong can Node** — sua giao dien xong thi tai lai trang.
 | `uv run python -m main.zalo` | Long-poll Zalo Bot, xep tin vao hang doi |
 | `uv run mypy` | Kiem tra kieu, che do strict |
 | `uv run ruff check .` | Lint |
+| `uv run python -m main.cli ingest <tep>` | Nap tai lieu vao RAG (chi admin) |
+| `uv run python -m main.cli stats [ngay]` | Tien di dau, cham o dau, cache co an khong |
 | `uv run pytest` | unit test (khong can I/O) |
 | `uv run lint-imports` | **Cuong che luat kien truc. Bat buoc trong CI.** |
 | `uv run python ops/guard_env.py` | **Chan doc env ngoai `config/`. Bat buoc trong CI.** |
 | `uv run python ops/guard_sql.py` | **Chan SQL cham `memory_fact` ngoai `memory/repository/`. Bat buoc trong CI.** |
 | `uv run python ops/canary_import_rules.py` | Chung minh 8 luat tren that su bat duoc vi pham |
+| `uv run python -m evals.runner [dataset]` | Bo eval: Recall@5, faithfulness, p95. **Ton tien that** |
+| `uv run python ops/benchmark_embedding.py` | So sanh model embedding tren du lieu cua chinh du an |
+| `uv run python ops/benchmark_rerank.py <ds>` | So sanh nha cung cap rerank, va de xuat RERANK_MIN_SCORE |
 
 ### Audit memory
 
@@ -62,7 +70,23 @@ cho phep no tu ghi.
 uv run python -m main.cli memory zalo_bot <thread_id>
 ```
 
-### Quan tri nhom (Zalo, Messenger)
+### Nap tai lieu (RAG)
+
+Bot chi tra loi duoc theo tai lieu sau khi co tai lieu. Nap bang CLI — **chi admin**,
+khong co route HTTP nao lam viec nay:
+
+```bash
+uv run python -m main.cli ingest tai-lieu/so-tay.md "So tay nhan vien 2026"
+```
+
+Nhan `.txt` `.md` `.pdf` `.docx`. Nap lai cung mot tep khong doi thi khong lam gi;
+noi dung doi thi len **phien ban moi** chu khong sua ban cu — mot cau tra loi da
+trich dan chunk cu thi chunk do phai con nguyen van.
+
+Nap tai lieu **dau tien** xong phai khoi dong lai worker: cong cu
+`search_knowledge_base` chi duoc khai bao khi kho tai lieu co gi.
+
+### Quan tri nhom (Zalo)
 
 `GROUP_POLICY=allowlist` nghia la bot cai vao nhom moi thi **im lang** cho toi khi
 duoc them. Lay `thread_id` tu log cua process `zalo` (dong `da xep hang tin Zalo`):
@@ -85,3 +109,20 @@ Co hieu luc ngay, khong can khoi dong lai worker.
    va bo eval mat y nghia. Xem ARCHITECTURE.md section 7.1.
 4. `gpt-5-mini` la model reasoning: dung `max_completion_tokens`, va token reasoning
    AN VAO cap do. Cap thap thi API tra ve content rong, khong nem loi nao.
+5. Co `replied:` chi duoc dat khi that su da gui van ban. Dat no o moi that bai se
+   lam lan retry tu thoat ngay va `max_tries` thanh vo nghia — xem `main/worker.py`.
+
+## Theo doi
+
+```bash
+uv run python -m main.cli stats 7      # doc thang tu usage_log, khong can dung gi
+curl http://127.0.0.1:3000/api/metrics # dinh dang Prometheus, cho Grafana
+
+# Grafana + Prometheus, cam san datasource va dashboard:
+docker compose -f ops/docker-compose.yml --profile monitoring up -d
+#   Grafana    http://127.0.0.1:3001
+#   Prometheus http://127.0.0.1:9090
+```
+
+`cli stats` tra loi ba cau: tien di dau, route nao cham, va prompt caching co dang
+an khong. Ti le cache tut ve 0 nghia la tien to on dinh cua prompt da vo.

@@ -16,6 +16,7 @@ from agents.pipeline.stages.command import (
     NOTHING_REMEMBERED,
     Answer,
     AskConfirm,
+    DeferredWrite,
     NotACommand,
     handle_command,
 )
@@ -174,3 +175,80 @@ class TestTrongDuongOng:
         await handle_message(make_msg("memory"), deps)
 
         assert deps.memory.appended == []
+
+
+class TestLenhGhiPhaiQuaChotChan:
+    """`nho giup:` la lenh GHI, va duong ghi fact goi embedding that o moi lan.
+
+    Doc va xoa chay som la co chu dich. Ghi thi khong: de chung o stage 3 nghia la
+    mot nguoi go `nho giup:` lien tuc se tieu tien ma khong qua rate limit lan
+    ngan sach ngay.
+    """
+
+    async def test_handle_command_KHONG_ghi_ngay_ma_hoan_lai(self) -> None:
+        memory = FakeMemory()
+
+        outcome = await handle_command("nhớ giúp: deadline 30/11", memory, SCOPE, "u1")
+
+        assert isinstance(outcome, DeferredWrite)
+        assert outcome.command.content == "deadline 30/11"
+        assert memory.remembered == []
+
+    async def test_qua_duoc_chot_chan_thi_ghi_that(self) -> None:
+        deps = make_deps(memory=FakeMemory())
+
+        result = await handle_message(make_msg("nhớ giúp: deadline 30/11"), deps)
+
+        assert result == Handled(replied=True)
+        assert [f.content for f in deps.memory.remembered] == ["deadline 30/11"]  # type: ignore[attr-defined]
+        # Van la duong khong goi model.
+        assert deps.llm.calls == []  # type: ignore[attr-defined]
+
+    async def test_bi_rate_limit_thi_KHONG_ghi(self) -> None:
+        from agents.pipeline.stages.ratelimit import RATE_LIMITED_TEXT
+        from agents.ports.ratelimit import Denied
+
+        from .fakes import FakeRateLimit
+
+        deps = make_deps(
+            memory=FakeMemory(),
+            rate_limit=FakeRateLimit(denied=Denied(retry_after_ms=5000, tier="user")),
+        )
+
+        await handle_message(make_msg("nhớ giúp: deadline 30/11"), deps)
+
+        assert deps.memory.remembered == []  # type: ignore[attr-defined]
+        assert deps.channel.sent == [RATE_LIMITED_TEXT]  # type: ignore[attr-defined]
+
+    async def test_het_ngan_sach_thi_KHONG_ghi(self) -> None:
+        from .fakes import FakeRateLimit
+
+        deps = make_deps(memory=FakeMemory(), rate_limit=FakeRateLimit(budget_ok=False))
+
+        await handle_message(make_msg("nhớ giúp: deadline 30/11"), deps)
+
+        assert deps.memory.remembered == []  # type: ignore[attr-defined]
+
+    async def test_XOA_van_chay_khi_dang_bi_rate_limit(self) -> None:
+        """Chieu nguoc lai phai giu nguyen: chan duong ghi khong duoc chan duong xoa."""
+        from agents.ports.ratelimit import Denied
+
+        from .fakes import FakeRateLimit
+
+        deps = make_deps(
+            memory=FakeMemory(forget_matches=[fact("Nam làm ở công ty A", "42")]),
+            rate_limit=FakeRateLimit(denied=Denied(retry_after_ms=5000, tier="user")),
+        )
+
+        await handle_message(make_msg("quên chỗ làm"), deps)
+
+        assert deps.memory.staged == [("u1", ["42"])]  # type: ignore[attr-defined]
+
+    async def test_subject_suy_ra_tu_SENDER_ID_khi_ghi(self) -> None:
+        deps = make_deps(memory=FakeMemory())
+
+        await handle_message(make_msg("nhớ giúp: tôi tên Nam", sender_id="u9"), deps)
+
+        assert deps.memory.remembered[0].subject_id == user_subject("u9")  # type: ignore[attr-defined]
+        assert deps.memory.remembered[0].source == "explicit"  # type: ignore[attr-defined]
+        assert deps.memory.remembered[0].confidence == 1.0  # type: ignore[attr-defined]

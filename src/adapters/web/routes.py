@@ -6,6 +6,7 @@ Khong goi LLM, khong tu chay pipeline.
 import json
 import time
 from collections.abc import AsyncIterator
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from infra.cancel import request_cancel
 from infra.db import execute, fetch
 from infra.dedupe import claim
 from infra.logger import get_logger
+from infra.metrics import prometheus_text
 from infra.queue import enqueue_reply
 from infra.redis_client import aw, get_redis
 
@@ -47,6 +49,39 @@ def require_localhost(request: Request) -> None:
         raise HTTPException(status_code=403, detail="chi cho phep truy cap tu localhost")
 
 
+def require_operator(request: Request) -> None:
+    """Nhu require_localhost, nhung nhan them dia chi MANG RIENG.
+
+    Vi sao phai noi long DUNG cho nay: Prometheus chay trong mot container khac va
+    goi toi `api:3000` qua mang cua compose, nen dia chi den la 172.x — khong phai
+    loopback. Voi require_localhost thi no bi 403 va toan bo dashboard Grafana trong
+    rong, ma khong co dong log nao noi vi sao. Da tra gia: bug nay ton tai ngay tu
+    luc viet /metrics, va chi lo ra khi goi thu tu mot IP khac 127.0.0.1.
+
+    Vi sao van khong mo han: dieu kien la `not is_global` — chan moi dia chi DINH
+    TUYEN DUOC TU INTERNET. Cong 3000 trong ops/docker-compose.yml lai chi publish
+    tren 127.0.0.1, nen tu ngoai may khong ai cham toi duoc; day la lop thu hai.
+
+    Dung `is_global` chu khong `is_private`: `is_private` cua Python con bao True cho
+    ca cac dai TAI LIEU (203.0.113.0/24, 2001:db8::/32) — dung no thi dieu kien noi
+    mot dang va lam mot neo. `is_global` noi dung dieu ta muon chan.
+
+    KHONG dung cho cac route khac. Chung doc va XOA duoc hoi thoai; /metrics thi chi
+    doc so lieu tong hop, khong co noi dung tin nhan nao.
+    """
+    client = request.client.host if request.client else None
+    if client in _LOCAL_ADDRESSES:
+        return
+    try:
+        cong_khai = ip_address(client or "").is_global
+    except ValueError:
+        # Khong doc duoc dia chi thi CHAN. Khong biet la ai thi khong cho vao.
+        cong_khai = True
+    if cong_khai:
+        _log.warning("tu choi truy cap /metrics tu dia chi cong khai", ip=client)
+        raise HTTPException(status_code=403, detail="chi cho phep tu localhost hoac mang rieng")
+
+
 class ChatBody(BaseModel):
     thread_id: str = Field(min_length=1, alias="threadId")
     text: str = Field(min_length=1)
@@ -61,6 +96,24 @@ async def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+#: Bao nhieu ngay du lieu cho mot lan scrape. Rong hon thi moi lan scrape quet nhieu
+#: dong hon ma Grafana van tu gop theo cua so cua no.
+_METRICS_WINDOW_DAYS = 1
+
+
+@router.get("/metrics")
+async def metrics(request: Request) -> Response:
+    """Phoi bay so lieu cho Prometheus/Grafana.
+
+    Chinh sach truy cap NOI LONG hon cac route khac — xem require_operator: Prometheus
+    goi tu mot container khac nen dia chi den khong phai loopback.
+    """
+    require_operator(request)
+    body = await prometheus_text(_METRICS_WINDOW_DAYS, get_settings().DAILY_BUDGET_USD)
+    # Prometheus doi text/plain; version=0.0.4 la phien ban dinh dang phoi bay.
+    return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 @router.get("/threads")
 async def list_threads(request: Request) -> list[dict[str, Any]]:
     """Danh sach hoi thoai cho sidebar. Doc tu Postgres, khong phai localStorage."""
@@ -71,7 +124,18 @@ async def list_threads(request: Request) -> list[dict[str, Any]]:
                   first_value(m.text)       OVER w AS last_text,
                   first_value(m.created_at) OVER w AS last_at,
                   count(*)                  OVER (PARTITION BY m.thread_id) AS message_count,
-                  t.title
+                  t.title,
+                  -- Nhan cua mot hoi thoai la CAU HOI DAU TIEN, khong phai tin cuoi.
+                  --
+                  -- Tin cuoi gan nhu luon la cau tra loi cua bot, va mot cau tra loi
+                  -- dai ba dong thi ba mươi ky tu dau cua no khong phan biet duoc
+                  -- hoi thoai nay voi hoi thoai khac. Nguoi dung nho ho DA HOI GI.
+                  (SELECT q.text
+                     FROM inbound_message q
+                    WHERE q.platform = m.platform AND q.thread_id = m.thread_id
+                      AND NOT q.from_bot
+                    ORDER BY q.created_at
+                    LIMIT 1) AS first_question
              FROM inbound_message m
              LEFT JOIN thread_meta t
                     ON t.platform = m.platform AND t.thread_id = m.thread_id
@@ -82,8 +146,9 @@ async def list_threads(request: Request) -> list[dict[str, Any]]:
     threads = [
         {
             "threadId": r["thread_id"],
-            # Ten nguoi dat thang tin nhan cuoi. Chua dat thi hien tin cuoi lam nhan tam.
+            # Ten nguoi dat thang cac nhan tu dong. Chua dat thi dung cau hoi dau tien.
             "title": r["title"],
+            "question": r["first_question"],
             "lastText": r["last_text"],
             "lastAt": r["last_at"].isoformat(),
             "messageCount": r["message_count"],

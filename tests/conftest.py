@@ -24,6 +24,7 @@ import pytest
 
 from config import get_settings
 from infra.db import close_db, fetch
+from infra.http import close_http
 from infra.redis_client import aw, close_redis, get_redis
 
 
@@ -51,6 +52,7 @@ async def dong_ket_noi_cuoi_cung() -> AsyncIterator[None]:
     # Con treo mot pool Postgres la process test khong bao gio thoat.
     await close_db()
     await close_redis()
+    await close_http()
 
 
 @pytest.fixture

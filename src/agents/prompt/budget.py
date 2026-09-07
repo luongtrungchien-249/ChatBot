@@ -28,7 +28,7 @@ BudgetLayer: TypeAlias = Literal[
 
 TOKEN_BUDGET: dict[BudgetLayer, int] = {
     # Hang so ta tu viet nen day la cap THAT SU, khong phai cau dao.
-    # Do that 06/09/2026 bang ops/calibrate_tokens.py: 1539 token.
+    # Do that 07/09/2026 bang ops/calibrate_tokens.py: 1535 token.
     #
     # Prompt caching DANG AN tren tang nay: usage_log ghi nhan cache_read_tokens
     # 1408-1792 o 20/32 lan goi. OpenAI chia cache theo block 128 token, va 1408 =

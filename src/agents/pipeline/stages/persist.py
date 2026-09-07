@@ -30,11 +30,16 @@ async def persist_outbound(
     in_reply_to_id: str,
     bot_name: str,
     text: str,
+    is_group: bool,
 ) -> None:
     """Ghi cau tra loi cua bot.
 
     message_id lay tu tin goc + hau to: mot cau hoi sinh ra dung mot cau tra loi,
     nen khoa nay vua duy nhat vua tu chong trung khi job retry.
+
+    `is_group` lay tu tin GOC chu khong dat cung False: cot do mo ta cuoc hoi thoai,
+    khong mo ta nguoi gui. Ghi sai thi mot thread nhom co nua so dong bao la khong
+    phai nhom, va bat ky truy van nao loc theo cot do cung doc ra mot nua su that.
     """
     await memory.append(
         scope,
@@ -43,7 +48,7 @@ async def persist_outbound(
             sender_id="bot",
             sender_name=bot_name,
             text=text,
-            is_group=False,
+            is_group=is_group,
             reply_to_id=in_reply_to_id,
             from_bot=True,
         ),

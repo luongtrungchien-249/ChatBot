@@ -123,6 +123,9 @@ class FakeMemory:
     stored_summary: str | None = None
     stored_facts: list[Fact] = field(default_factory=list)
     forget_matches: list[Fact] = field(default_factory=list)
+    #: Fact da duoc ghi qua remember(). Duong ghi phai qua ratelimit + budget guard,
+    #: nen test can nhin thay no CO chay hay KHONG.
+    remembered: list[NewFact] = field(default_factory=list)
     staged: list[tuple[str, list[str]]] = field(default_factory=list)
     #: So fact ma confirm_forget() se bao la da xoa. 0 = khong co gi dang cho.
     confirm_result: int = 0
@@ -141,7 +144,7 @@ class FakeMemory:
         return self.stored_facts
 
     async def remember(self, scope: ThreadScope, fact: NewFact) -> None:
-        return None
+        self.remembered.append(fact)
 
     async def forget(self, scope: ThreadScope, actor_id: str, pattern: str) -> list[Fact]:
         return self.forget_matches

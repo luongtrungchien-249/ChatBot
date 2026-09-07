@@ -52,11 +52,6 @@ class Settings(BaseSettings):
     ZALO_MODE: Literal["webhook", "polling"] = "polling"
     ZALO_WEBHOOK_SECRET: str = ""
 
-    # --- Messenger (giai doan 5) ---
-    META_APP_SECRET: str = ""
-    META_PAGE_TOKEN: str = ""
-    META_VERIFY_TOKEN: str = ""
-
     # --- Chinh sach ---
     #: Mot hoac NHIEU ten goi, ngan cach bang dau phay: "CP_Assistant,CP".
     #: Nguoi trong nhom go ten ngan nhat go duoc, nen phai khai ca ten ngan.

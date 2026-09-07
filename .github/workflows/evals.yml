@@ -1,0 +1,119 @@
+name: Eval
+
+# KHONG chay moi commit: moi lan chay goi model that va ton tien that.
+on:
+  schedule:
+    # 19:00 UTC = 02:00 gio Viet Nam. Chay khi khong ai dang lam viec.
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+  pull_request:
+    # Chi khi PR dung vao thu THAT SU doi ket qua eval. Sua mot dong log thi khong.
+    paths:
+      - 'src/agents/prompt/**'
+      - 'src/knowledge/**'
+      - 'src/llm/models.py'
+      - 'src/llm/reranker.py'
+      - 'evals/**'
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bot
+          POSTGRES_PASSWORD: bot
+          POSTGRES_DB: chatbot
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bot -d chatbot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: error
+      DATABASE_URL: postgres://bot:bot@localhost:5432/chatbot
+      REDIS_URL: redis://localhost:6379
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: text-embedding-3-large
+      EMBEDDING_DIM: '1024'
+      RERANK_PROVIDER: ${{ secrets.RERANK_PROVIDER || 'fake' }}
+      RERANK_MODEL: ${{ secrets.RERANK_MODEL || 'fake' }}
+      RERANK_API_KEY: ${{ secrets.RERANK_API_KEY || 'fake' }}
+      RERANK_MIN_SCORE: '0.55'
+      BOT_MENTION_NAME: CP_Assistant,CP,Bot_CP_Assistant
+      DAILY_BUDGET_USD: '5'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Khong co khoa that thi eval khong noi len dieu gi — nhung do la mot LUA CHON
+      # hop le cua chu repo, khong phai mot hong hoc. Bao vang roi dung, KHONG do.
+      #
+      # Day dung la lo ma buoc "Chay eval" duoi kia da tranh bang ma thoat 2: mot job
+      # nightly do moi dem vi mot viec co y chua lam la mot job khong ai doc nua.
+      # Hai cho phai theo cung mot luat, neu khong thi luat do chi la mot cau noi.
+      - name: Kiem tra khoa
+        id: khoa
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "::warning title=Eval KHONG chay::Thieu secret OPENAI_API_KEY."
+            echo "co_khoa=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "co_khoa=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+        if: steps.khoa.outputs.co_khoa == 'true'
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - run: uv sync --frozen --all-groups
+        if: steps.khoa.outputs.co_khoa == 'true'
+
+      - name: Migrate
+        if: steps.khoa.outputs.co_khoa == 'true'
+        run: uv run python -m main.cli migrate
+
+      # Tai lieu that KHONG nam trong repo (chung la tai lieu noi bo). Buoc nay chi
+      # chay khi co thu muc evals/corpus/ — do la cho de dat mot ban sao dung cho eval.
+      - name: Nap tai lieu cho eval
+        if: steps.khoa.outputs.co_khoa == 'true'
+        run: |
+          if [ -d evals/corpus ] && [ -n "$(ls -A evals/corpus 2>/dev/null)" ]; then
+            for f in evals/corpus/*; do
+              uv run python -m main.cli ingest "$f"
+            done
+          else
+            echo "::notice title=Khong co evals/corpus::Eval se chay tren kho tai lieu rong."
+          fi
+
+      # Ma thoat 2 = dataset con la dong mau. Do la mot viec CO Y chua lam, khong
+      # phai mot hong hoc — bao vang va di tiep. Chi ma 1 moi lam job do.
+      - name: Chay eval
+        if: steps.khoa.outputs.co_khoa == 'true'
+        run: |
+          set +e
+          uv run python -m evals.runner
+          code=$?
+          set -e
+          if [ $code -eq 2 ]; then
+            echo "::warning title=Eval chua chay::qa.jsonl con la dong mau. Can 50 cau viet tay tu tai lieu that."
+            exit 0
+          fi
+          exit $code

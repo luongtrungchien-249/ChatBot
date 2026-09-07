@@ -39,7 +39,6 @@ from .container import build_deps
 configure_logging()
 _log = get_logger()
 
-#: TODO(giai-doan-5): messenger.
 #: CLI khong di qua hang doi (xem cli.py) nen khong co mat o day.
 _CHANNELS: dict[Platform, ChannelPort] = {
     "web": web_channel,
@@ -47,15 +46,24 @@ _CHANNELS: dict[Platform, ChannelPort] = {
 }
 
 
-async def handle_reply(_ctx: dict[str, Any], payload: dict[str, Any]) -> None:
+async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     msg = from_payload(payload)
     log = _log.bind(trace_id=msg.trace_id)
 
     # Retry cua hang doi khong duoc phep gui tin nhan thu hai cho cung mot message_id.
     # Thieu co nay, mot su co 5xx bien thanh bot spam nhom.
+    #
+    # Co nay CHI duoc dat khi that su co van ban gui di — xem Failed.replied. Dat no
+    # o moi that bai (ban cu lam vay) thi lan retry vao day roi thoat ngay, va
+    # max_tries = 3 chua bao gio thu lai lan nao.
     if await has_replied(msg.platform, msg.message_id):
         log.warning("da tra loi tin nay roi, bo qua lan retry")
         return
+
+    # ARQ dem tu 1. Lan cuoi thi khong con co hoi nao nua, nen pipeline phai tra loi
+    # nguoi dung ngay ca khi loi thuoc loai binh thuong se retry.
+    job_try = int(ctx.get("job_try", 1) or 1)
+    is_final_attempt = job_try >= WorkerSettings.max_tries
 
     channel = _CHANNELS.get(msg.platform)
     if channel is None:
@@ -67,8 +75,8 @@ async def handle_reply(_ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     # Co huy phai xoa TRUOC khi chay: mot co sot lai tu cau truoc se huy oan cau nay.
     await clear_cancel(scope)
 
-    deps = await build_deps(channel)
-    # Chi kenh web hien duoc tien do. Zalo/Messenger khong co cho de ve.
+    deps = await build_deps(channel, msg.platform)
+    # Chi kenh web hien duoc tien do. Zalo khong co cho de ve.
     on_event = (
         (lambda event: publish_progress(msg.thread_id, event))
         if msg.platform == "web"
@@ -77,7 +85,7 @@ async def handle_reply(_ctx: dict[str, Any], payload: dict[str, Any]) -> None:
 
     result = await handle_message(
         msg,
-        _with_runtime_hooks(deps, on_event, lambda: is_cancelled(scope)),
+        _with_runtime_hooks(deps, on_event, lambda: is_cancelled(scope), is_final_attempt),
     )
     await clear_cancel(scope)
 
@@ -87,12 +95,16 @@ async def handle_reply(_ctx: dict[str, Any], payload: dict[str, Any]) -> None:
         return
 
     assert isinstance(result, Failed)
-    # Nguoi dung da nhan cau fallback roi. Danh dau truoc khi nem, de lan retry khong
-    # gui them tin thu hai.
-    await mark_replied(msg.platform, msg.message_id)
+    # Chi danh dau khi pipeline THAT SU da gui gi do. Chua gui thi de trong, de lan
+    # retry con chay lai duoc.
+    if result.replied:
+        await mark_replied(msg.platform, msg.message_id)
 
     if is_retryable(result.error):
-        raise RuntimeError(f"upstream loi, de hang doi retry: {result.error}")
+        raise RuntimeError(
+            f"upstream loi, de hang doi retry (lan {job_try}/{WorkerSettings.max_tries}): "
+            f"{result.error}"
+        )
 
     log.warning("that bai nhung khong retry", error=str(result.error))
 
@@ -112,7 +124,9 @@ async def handle_summarize(_ctx: dict[str, Any], payload: dict[str, Any]) -> Non
         await extract_facts(scope, batch, trace_id)
 
 
-def _with_runtime_hooks(deps: Any, on_event: Any, should_stop: Any) -> Any:
+def _with_runtime_hooks(
+    deps: Any, on_event: Any, should_stop: Any, is_final_attempt: bool
+) -> Any:
     """Gan cac hook chi biet duoc luc chay vao Deps (dataclass frozen)."""
     from dataclasses import replace
 
@@ -124,6 +138,7 @@ def _with_runtime_hooks(deps: Any, on_event: Any, should_stop: Any) -> Any:
         on_react_event=on_event,
         should_stop=should_stop,
         schedule_maintenance=schedule,
+        is_final_attempt=is_final_attempt,
     )
 
 

@@ -1,7 +1,7 @@
 """Stage 13: gui cau tra loi.
 
 KHONG chunk o day. Hop dong cua ChannelPort.send() la "tu chunk theo
-max_message_chars" — moi nen tang mot gioi han (Messenger 2000 ky tu), va agents/
+max_message_chars" — moi nen tang mot gioi han (Zalo 2000 ky tu), va agents/
 khong duoc hardcode con so cua tung nen tang.
 """
 

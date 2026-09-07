@@ -4,6 +4,18 @@
 **Ngày lập:** 02/09/2026
 **Phiên bản:** 3.0 — hợp nhất toàn bộ (Platform + RAG + Memory)
 
+> **Đọc file này như một bản ghi lịch sử, không phải trạng thái hiện tại.**
+> Cập nhật 07/09/2026. Ba chỗ trong đây đã bị thực tế bác bỏ, giữ nguyên văn để thấy
+> vì sao chúng đổi:
+>
+> | Chỗ | Bản này viết | Thực tế |
+> |---|---|---|
+> | Messenger (§2.2, tuần 2, phần V) | Nộp App Review ngày 1 | **Bỏ khỏi phạm vi 07/09/2026** — chỉ tích hợp Zalo. Không còn code, biến cấu hình hay `Platform` nào cho nó |
+> | Ngưỡng chống trùng fact (§4.2) | `cosine > 0.9` | **0,70.** Con số 0,9 viết trước khi có phép đo nào; đo bằng `ops/calibrate_dedupe.py` thì hai cách diễn đạt của **cùng một ý** chỉ đạt 0,736 |
+> | Lịch 6 tuần (phần III) | RAG tuần 3, Memory tuần 4 | Thứ tự thật: Memory (GĐ 7) xong **trước** RAG (GĐ 6). Trạng thái thật ở `docs/plan-thi-cong.md` §2 |
+>
+> Trạng thái hiện tại: **`docs/plan-thi-cong.md`**. Kiến trúc: **`ARCHITECTURE.md`**.
+
 ---
 
 ## PHẦN I — TỔNG QUAN
@@ -90,7 +102,10 @@ OA chỉ cần nếu làm chăm sóc khách hàng doanh nghiệp. Personal chỉ
 
 **Cảnh báo:** tính năng group của Bot API còn ở trạng thái thử nghiệm, trọng tâm hiện tại vẫn là hội thoại 1:1. Thiết kế sao cho nếu group ngừng hoạt động thì bot vẫn dùng được ở DM.
 
-### 2.2 Messenger
+### 2.2 Messenger — **đã bỏ khỏi phạm vi (07/09/2026)**
+
+> Phần dưới giữ nguyên để tra cứu nếu một ngày quay lại. Hiện tại: không làm.
+
 
 Bot chạy dưới danh nghĩa **Facebook Page**, không dùng được profile cá nhân. Cần Meta Business account, App loại Business, App Review cho `pages_messaging`.
 
@@ -291,7 +306,12 @@ CREATE TABLE memory_fact (
 
 **Explicit trước, implicit sau.** Explicit: `@nam_chatbot nhớ giúp: deadline 30/11`. Implicit: model trích xuất fact, chỉ ghi khi `confidence >= 0.8`, bật sau khi đã có công cụ audit.
 
-**Chống trùng:** trước khi insert, tìm fact tương tự (cosine > 0.9) cùng subject. Trùng ý → bỏ. Mâu thuẫn → revoke cũ, insert mới.
+**Chống trùng:** trước khi insert, tìm fact tương tự cùng subject. Trùng ý → bỏ. Mâu thuẫn → revoke cũ, insert mới.
+
+> ~~cosine > 0.9~~ → **0,70**. Đo bằng `ops/calibrate_dedupe.py` ngày 06/09/2026: cần bắt
+> 0,736–0,958, cần bỏ qua 0,276–0,524. Với 0,9 thì ngay cả hai cách nói của cùng một ý
+> cũng không bị coi là trùng. Ngưỡng cho lệnh `quên` là **0,30** + top-5, không phải 0,85.
+> Xem `docs/plan-thi-cong.md` §9.
 
 **Quyền người dùng — bắt buộc:**
 ```

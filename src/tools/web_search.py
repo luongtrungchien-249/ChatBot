@@ -11,6 +11,7 @@ import httpx
 
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
+from infra.http import get_http
 
 _ENDPOINT = "https://api.tavily.com/search"
 _TIMEOUT_S = 12.0
@@ -67,18 +68,18 @@ async def run_web_search(payload: dict[str, Any], _trace_id: str) -> str:
     raw_max = payload.get("max_results")
     max_results = min(max(raw_max, 1), 10) if isinstance(raw_max, int) else 5
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-        response = await client.post(
-            _ENDPOINT,
-            headers={"Authorization": f"Bearer {get_settings().TAVILY_API_KEY}"},
-            json={
-                "query": query,
-                "max_results": max_results,
-                "search_depth": "basic",
-                # Tu tong hop trong vong ReAct de con giu trich dan.
-                "include_answer": False,
-            },
-        )
+    response = await get_http().post(
+        _ENDPOINT,
+        headers={"Authorization": f"Bearer {get_settings().TAVILY_API_KEY}"},
+        timeout=_TIMEOUT_S,
+        json={
+            "query": query,
+            "max_results": max_results,
+            "search_depth": "basic",
+            # Tu tong hop trong vong ReAct de con giu trich dan.
+            "include_answer": False,
+        },
+    )
 
     if response.status_code != httpx.codes.OK:
         raise RuntimeError(f"Tavily tra ve {response.status_code}: {response.text[:200]}")

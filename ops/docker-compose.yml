@@ -61,6 +61,36 @@ services:
     depends_on:
       redis: { condition: service_started }
 
+  # --- Theo doi. Tach `profiles` de `docker compose up` thuong khong keo chung theo:
+  # mot may dev khong can hai container nua chi de nhin do thi.
+  # Bat bang:  docker compose --profile monitoring up -d
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ['monitoring']
+    volumes: ['./prometheus.yml:/etc/prometheus/prometheus.yml:ro', 'promdata:/prometheus']
+    # Chi localhost o phia host, giong `api`: so lieu van hanh khong phai thu cong khai.
+    ports: ['127.0.0.1:9090:9090']
+    depends_on: [api]
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: ['monitoring']
+    volumes:
+      - './grafana/provisioning:/etc/grafana/provisioning:ro'
+      - './grafana/dashboards:/var/lib/grafana/dashboards:ro'
+      - 'grafanadata:/var/lib/grafana'
+    environment:
+      # Dashboard va datasource deu duoc cam san tu tep, nen khong can dang nhap de
+      # cau hinh gi. Van la localhost-only o phia host.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_USERS_DEFAULT_THEME: dark
+    ports: ['127.0.0.1:3001:3000']
+    depends_on: [prometheus]
+
 volumes:
   pgdata:
   redisdata:
+  promdata:
+  grafanadata:

@@ -4,7 +4,7 @@ from ..domain.thread import ThreadScope
 
 
 class ChannelPort(Protocol):
-    #: Messenger 2000 — agents khong hardcode con so cua tung nen tang.
+    #: Zalo 2000 — agents khong hardcode con so cua tung nen tang.
     max_message_chars: int
 
     async def typing(self, scope: ThreadScope) -> None: ...

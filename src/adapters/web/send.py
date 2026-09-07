@@ -47,7 +47,7 @@ _BACKGROUND: set[Any] = set()
 class WebChannel:
     """Implement ChannelPort."""
 
-    # Web khong co gioi han that su nhu Messenger; de rong de khong cat cau tra loi.
+    # Web khong co gioi han 2000 ky tu nhu Zalo; de rong de khong cat cau tra loi.
     max_message_chars = WEB_MAX_MESSAGE_CHARS
 
     async def typing(self, scope: ThreadScope) -> None:

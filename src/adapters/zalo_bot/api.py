@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from config import get_settings
+from infra.http import get_http
 from infra.logger import get_logger
 
 
@@ -84,8 +85,7 @@ def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
 
 async def get_me() -> dict[str, Any]:
     """Ho so bot. Dung de kiem tra token luc khoi dong thay vi doi tin dau tien."""
-    async with httpx.AsyncClient(timeout=_SEND_TIMEOUT_S) as client:
-        response = await client.get(_url("getMe"))
+    response = await get_http().get(_url("getMe"), timeout=_SEND_TIMEOUT_S)
     return _unwrap(response.json())
 
 
@@ -96,8 +96,9 @@ async def get_updates(timeout_s: int = POLL_TIMEOUT_S) -> dict[str, Any] | None:
     """
     # Timeout HTTP phai DAI hon timeout long-poll, neu khong client tu ngat truoc
     # khi server kip tra loi va moi tin den dung luc do deu bi mat.
-    async with httpx.AsyncClient(timeout=timeout_s + 10) as client:
-        response = await client.get(_url("getUpdates"), params={"timeout": timeout_s})
+    response = await get_http().get(
+        _url("getUpdates"), params={"timeout": timeout_s}, timeout=timeout_s + 10
+    )
 
     body = response.json()
     if not body.get("ok") and body.get("error_code") == EMPTY_POLL_CODE:
@@ -112,8 +113,9 @@ async def send_message(chat_id: str, text: str) -> str:
 
     for attempt in range(1, _SEND_MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=_SEND_TIMEOUT_S) as client:
-                response = await client.post(_url("sendMessage"), json=payload)
+            response = await get_http().post(
+                _url("sendMessage"), json=payload, timeout=_SEND_TIMEOUT_S
+            )
             result = _unwrap(response.json())
             message_id = result.get("message_id")
             return message_id if isinstance(message_id, str) else ""

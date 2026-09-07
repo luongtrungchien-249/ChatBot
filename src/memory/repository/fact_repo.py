@@ -16,7 +16,7 @@ from agents.domain.thread import ThreadScope
 from agents.ports.memory import Fact, FactSource, NewFact
 from infra.db import execute, fetch
 from infra.logger import get_logger
-from llm.embedder import get_embedder
+from llm.embedder import embed_query, get_embedder
 
 from ..dedupe import (
     FORGET_MAX_CANDIDATES,
@@ -70,25 +70,44 @@ async def list_facts(scope: ThreadScope, subject_id: str) -> list[Fact]:
 
 
 async def search_facts(scope: ThreadScope, subject_id: str, query: str, k: int = 5) -> list[Fact]:
-    """Fact lien quan nhat toi `query`, trong pham vi mot subject cua mot thread.
+    """Fact lien quan nhat toi `query`, trong pham vi MOT subject cua mot thread."""
+    return await search_facts_for(scope, [subject_id], query, k)
+
+
+async def search_facts_for(
+    scope: ThreadScope, subject_ids: list[str], query: str, k: int = 5
+) -> list[Fact]:
+    """Nhu tren nhung tim tren NHIEU subject cung luc.
+
+    Mot cau truy van chu khong phai nhieu lan goi, va quan trong hon: MOT lan embed.
+    Duong nay chay o moi tin nhan, nen goi embedding hai lan cho hai subject la nhan
+    doi mot khoan chi thuong truc — dung khoan ma llm/embedder.py vua duoc sua de
+    dua vao chot chan ngan sach.
 
     `<=>` la khoang cach cosine cua pgvector: CANG NHO CANG GIONG. Index HNSW o
     migration 0003 phuc vu dung phep toan nay.
     """
+    if not subject_ids:
+        return []
     if not query.strip():
-        return await list_facts(scope, subject_id)
+        collected: list[Fact] = []
+        for subject in subject_ids:
+            collected.extend(await list_facts(scope, subject))
+        return collected
 
-    vector = (await get_embedder().embed([query]))[0]
+    # Qua cache: duong nay chay o MOI tin nhan, va RAG embed DUNG chuoi nay mot lan
+    # nua trong cung luot. Cache chung bo hang mot vong mang khoi duong phan hoi.
+    vector = await embed_query(query)
     rows = await fetch(
         """SELECT id, subject_id, content, source, confidence, created_at
              FROM memory_fact
-            WHERE platform = $1 AND thread_id = $2 AND subject_id = $3
+            WHERE platform = $1 AND thread_id = $2 AND subject_id = ANY($3::text[])
               AND revoked_at IS NULL
             ORDER BY embedding <=> $4::vector
             LIMIT $5""",
         scope.platform,
         scope.thread_id,
-        subject_id,
+        subject_ids,
         _to_vector(vector),
         k,
     )
@@ -168,7 +187,7 @@ async def match_for_forget(scope: ThreadScope, subject_id: str, pattern: str) ->
     Khong co buoc xac nhan thi mot lan go nham la mat sach, ma soft delete lai khong
     co lenh khoi phuc (ARCHITECTURE.md section 6.2).
     """
-    vector = (await get_embedder().embed([pattern]))[0]
+    vector = await embed_query(pattern)
     rows = await fetch(
         """SELECT id, subject_id, content, source, confidence, created_at, embedding
              FROM memory_fact

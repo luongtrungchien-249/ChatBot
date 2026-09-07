@@ -56,7 +56,6 @@ modules =
     adapters.cli
     adapters.web
     adapters.zalo_bot
-    adapters.messenger
 
 [importlinter:contract:4]
 name = L5: adapter khong goi LLM, khong doc memory hay knowledge

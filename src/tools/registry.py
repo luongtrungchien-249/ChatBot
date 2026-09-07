@@ -16,9 +16,15 @@ from agents.ports.llm import CallContext, ToolCall
 from agents.ports.tool import ToolDefinition, ToolResult
 from agents.prompt.instructions import COMPRESS_TOOL_RESULT_INSTRUCTION
 from infra.logger import get_logger
+from llm.models import MODELS
 from llm.openai_client import llm
 
 from .guard import exceeds_tool_budget, wrap_observation
+from .knowledge_search import (
+    KNOWLEDGE_SEARCH_DEFINITION,
+    is_knowledge_search_available,
+    run_knowledge_search,
+)
 from .paper_search import PAPER_SEARCH_DEFINITION, run_paper_search
 from .web_search import WEB_SEARCH_DEFINITION, is_web_search_available, run_web_search
 
@@ -55,7 +61,13 @@ _REGISTRY: tuple[Registration, ...] = (
         # Ba trong bon nguon khong can khoa nao ca.
         available=lambda: True,
     ),
-    # TODO(giai-doan-6): search_knowledge_base — chi khai khi RAG da chay.
+    Registration(
+        definition=KNOWLEDGE_SEARCH_DEFINITION,
+        run=run_knowledge_search,
+        source="Tai lieu noi bo",
+        # Chua nap tai lieu nao thi khong khai — xem knowledge_search.py.
+        available=is_knowledge_search_available,
+    ),
 )
 
 
@@ -76,8 +88,8 @@ async def _compress_if_too_long(raw: str, tool_name: str, ctx: CallContext) -> s
         compressed = await llm.cheap(
             system=COMPRESS_TOOL_RESULT_INSTRUCTION,
             input=raw,
-            max_tokens=8_000,
-            route="summarize",
+            max_tokens=MODELS["compress"].max_tokens,
+            route="compress",
             ctx=ctx,
         )
         # Model re co the tra chuoi rong (het cap cho phan reasoning) — dung ban goc.

@@ -17,7 +17,7 @@ from typing import Literal, TypeAlias
 
 from shared.result import Ok
 
-from ..domain.errors import BotError, is_config_error
+from ..domain.errors import BotError, is_config_error, is_retryable
 from ..domain.message import InboundMessage, scope_of
 from ..domain.thread import ThreadScope, user_subject
 from ..policy.access import AccessRules
@@ -34,7 +34,13 @@ from ..prompt.context import ContextInput
 from .stages.access import check_access
 from .stages.budget_guard import BUDGET_EXCEEDED_TEXT, check_budget
 from .stages.build_prompt import build_prompt
-from .stages.command import Answer, AskConfirm, handle_command
+from .stages.command import (
+    Answer,
+    AskConfirm,
+    DeferredWrite,
+    handle_command,
+    run_deferred_write,
+)
 from .stages.generate import (
     CONFIG_ERROR_TEXT,
     FALLBACK_TEXT,
@@ -58,6 +64,11 @@ class Handled:
 @dataclass(frozen=True, slots=True)
 class Failed:
     error: BotError
+    #: Da gui van ban nao cho nguoi dung chua.
+    #:
+    #: Cho goi (worker) can biet de dat co `replied:` — dat co khi CHUA gui gi se
+    #: lam lan retry tu thoat ngay, va `max_tries` thanh vo nghia.
+    replied: bool
     ok: Literal[False] = False
 
 
@@ -100,6 +111,14 @@ class Deps:
     on_react_event: Callable[[ReactEvent], None] | None = None
     #: Nguoi dung bam dung. Kenh nao khong co nut dung thi bo trong.
     should_stop: Callable[[], Awaitable[bool]] | None = None
+    #: Day co phai lan thu CUOI CUNG cua job khong.
+    #:
+    #: False = con retry phia sau, nen loi CO THE retry duoc thi KHONG gui cau
+    #: fallback: gui roi ma lan sau thanh cong thi nguoi dung nhan hai tin cho mot
+    #: cau hoi. Loi khong retry duoc thi van tra loi ngay, du con luot.
+    #:
+    #: Mac dinh True cho cac duong khong di qua hang doi (CLI): mot lan chay la het.
+    is_final_attempt: bool = True
     #: Stage 15 — xep hang viec nen L2. agents/ khong duoc import infra/ (L1) nen
     #: entrypoint tiem ham nay vao. Bo trong thi khong co viec nen nao chay.
     schedule_maintenance: Callable[[ThreadScope], Awaitable[None]] | None = None
@@ -128,6 +147,7 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     #  3. command — memory / quen / help. Tra loi luon, KHONG goi model.
     #     Dung TRUOC ratelimit co chu dich: nguoi dung phai xoa duoc memory cua
     #     chinh minh ngay ca khi dang bi rate limit.
+    #     Rieng lenh GHI (`nho giup:`) bi giu lai toi sau stage 5 — xem DeferredWrite.
     outcome = await handle_command(mention.text, deps.memory, scope, msg.sender_id)
     if isinstance(outcome, Answer):
         await respond(deps.channel, scope, outcome.text, msg.message_id)
@@ -160,6 +180,12 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     #  5. budget-guard — CHOT CHAN CUNG, khong phai alert.
     if not await check_budget(deps.rate_limit):
         await respond(deps.channel, scope, BUDGET_EXCEEDED_TEXT, msg.message_id)
+        return Handled(replied=True)
+
+    #  5b. lenh GHI da qua duoc ratelimit va ngan sach — gio moi thuc hien.
+    if isinstance(outcome, DeferredWrite):
+        text = await run_deferred_write(outcome, deps.memory, scope, msg.sender_id)
+        await respond(deps.channel, scope, text, msg.message_id)
         return Handled(replied=True)
 
     #  6. persist — ghi TRUOC khi goi model, de cau hoi khong bien mat khi API hong.
@@ -215,16 +241,30 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
         # Im lang trong nhom trong nhu bot chet va nguoi dung se spam mention.
         # Nhung cung khong duoc bao "thu lai sau" cho mot loi cau hinh: thu lai se
         # hong y het, va nguoi dung se tuong bot khong hieu minh noi gi.
-        text = CONFIG_ERROR_TEXT if is_config_error(result.error) else FALLBACK_TEXT
-        await respond(deps.channel, scope, text, msg.message_id)
+        #
+        # Con luot retry VA loi thuoc loai retry duoc -> im lang o luot nay. Gui cau
+        # fallback ngay bay gio nghia la neu lan sau thanh cong thi nguoi dung nhan
+        # HAI tin cho mot cau hoi; ma neu de tranh dieu do bang cach danh dau "da
+        # tra loi" thi lan retry lai tu thoat va khong bao gio thu lai that.
+        will_retry = is_retryable(result.error) and not deps.is_final_attempt
+        if not will_retry:
+            text = CONFIG_ERROR_TEXT if is_config_error(result.error) else FALLBACK_TEXT
+            await respond(deps.channel, scope, text, msg.message_id)
+        else:
+            log.info("con luot retry, chua gui cau fallback", error=str(result.error))
         # Van bao loi ra ngoai de worker quyet dinh retry (chi UpstreamError moi
-        # retry, xem is_retryable). Co 'replied:' chan gui lan hai.
-        return Failed(error=result.error)
+        # retry, xem is_retryable).
+        return Failed(error=result.error, replied=not will_retry)
 
     # 13. respond
     await respond(deps.channel, scope, result.value, msg.message_id)
     await persist_outbound(
-        deps.memory, scope, msg.message_id, primary_name(deps.bot_name), result.value
+        deps.memory,
+        scope,
+        msg.message_id,
+        primary_name(deps.bot_name),
+        result.value,
+        msg.is_group,
     )
 
     # 14. account  Da ghi trong llm/cost_meter.py ngay tai lan goi.

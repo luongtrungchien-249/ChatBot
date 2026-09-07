@@ -1,6 +1,6 @@
 """Hop dong chung giua adapter va agents.
 
-Agents khong biet Zalo hay Messenger la gi — moi adapter chuan hoa ve dung
+Agents khong biet Zalo hay giao dien web la gi — moi adapter chuan hoa ve dung
 hinh dang nay truoc khi day vao hang doi.
 """
 

@@ -16,3 +16,8 @@ htmlcov/
 
 *.log
 .DS_Store
+
+# Tai lieu that dung cho eval — khong bao gio commit. Xem evals/corpus/README.md.
+evals/corpus/*
+!evals/corpus/.gitkeep
+!evals/corpus/README.md

@@ -93,7 +93,7 @@ class CallContext:
     trace_id: str
 
 
-CheapRoute = Literal["rewrite", "summarize", "extract_facts"]
+CheapRoute = Literal["rewrite", "summarize", "extract_facts", "compress"]
 
 
 class LlmPort(Protocol):

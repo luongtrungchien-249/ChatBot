@@ -175,6 +175,23 @@ class RedisRateLimit:
         except ValueError:
             _log.error("cost:day khong doc duoc so — coi nhu het ngan sach", key=cost_day_key())
             return False
+        except Exception as error:
+            # FAIL-CLOSED, va day la cho KHAC han check() o tren.
+            #
+            # Rate limit hong thi cho qua: no la lop chong lam dung. Chot chan tien
+            # thi nguoc lai — khong doc duoc so da tieu ma van cho goi model nghia la
+            # mot su co Redis bien thanh mot hoa don khong co tran.
+            #
+            # Nguoi dung se thay cau "het ngan sach hom nay", khong dung han nguyen
+            # nhan. Do la danh doi co y: cau dung nguyen nhan ("mat ket noi Redis")
+            # la thong tin van hanh, chi thuoc ve log. Dong ERROR duoi day moi la
+            # cho noi that.
+            _log.error(
+                "khong doc duoc cost:day — FAIL-CLOSED, tu choi tra loi",
+                key=cost_day_key(),
+                err=str(error),
+            )
+            return False
 
         budget = get_settings().DAILY_BUDGET_USD
         within = spent < budget
@@ -184,11 +201,18 @@ class RedisRateLimit:
 
 
 async def add_cost(amount: float, now: datetime | None = None) -> None:
-    """Cong don chi tieu trong ngay. Goi tu llm/cost_meter.py."""
-    redis = get_redis()
+    """Cong don chi tieu trong ngay. Goi tu llm/cost_meter.py.
+
+    MOT vong mang, khong phai hai. Cung ly do da viet o _BUCKET_SCRIPT: mat ket noi
+    giua INCRBYFLOAT va EXPIRE de lai mot khoa khong co TTL. O day hau qua nhe hon
+    (khoa cost:day co ten theo ngay nen khong chan ai) nhung no ro ri khoa vinh vien
+    trong Redis, va khong co ly do gi de giu hai vong.
+    """
     key = cost_day_key(now)
-    await redis.incrbyfloat(key, amount)
-    await redis.expire(key, _COST_DAY_TTL_SECONDS)
+    pipe = get_redis().pipeline()
+    pipe.incrbyfloat(key, amount)
+    pipe.expire(key, _COST_DAY_TTL_SECONDS)
+    await pipe.execute()
 
 
 rate_limit = RedisRateLimit()

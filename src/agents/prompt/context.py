@@ -23,8 +23,8 @@ from ..ports.knowledge import RetrievedChunk
 from ..ports.llm import AssistantMessage, LlmMessage, UserMessage
 from ..ports.logger import LoggerPort
 from ..ports.memory import Fact
-from .budget import BudgetLayer, trim_to_budget
-from .builder import render_facts, render_knowledge, render_recent
+from .budget import CHARS_PER_TOKEN, TOKEN_BUDGET, BudgetLayer, trim_to_budget
+from .builder import render_facts, render_knowledge
 from .system import SYSTEM_PROMPT
 
 
@@ -62,40 +62,100 @@ def _fit(text: str, layer: BudgetLayer, logger: LoggerPort, trimmed: dict[str, i
     return result.text
 
 
+def conversation_turns(
+    recent: tuple[StoredMessage, ...], is_group: bool, logger: LoggerPort
+) -> tuple[LlmMessage, ...]:
+    """L1 -> cac LUOT HOI THOAI THAT, khong phai mot khoi van ban nen.
+
+    DAY LA CHO DA GAY RA MOT LOI NGHIEM TRONG (sua 07/09/2026).
+
+    Ban truoc nen ca lich su vao MOT user message boc trong <hoi_thoai_gan_day>, roi
+    chen mot luot assistant GIA — "Minh da doc phan thong tin nen. Ban hoi gi?" —
+    truoc cau hoi hien tai. Hau qua: luot assistant NGAY TRUOC cau hoi khong bao gio
+    la cau bot vua noi, ma luon la dong gia kia.
+
+    Trong nhom, nguoi dung tra loi cau hoi lam ro cua bot bang mot tu ("arXiv", "AI").
+    Tu vi tri cua model, no vua hoi "Ban hoi gi?" va nhan lai dung mot tu — nen no hoi
+    lam ro lan nua. Va lan nua. Da do duoc BON luot lien tiep khong mot lan goi cong
+    cu, khong mot cau tra loi.
+
+    Te hon: chinh SYSTEM_PROMPT day model rang noi dung trong the la DU LIEU THAM
+    KHAO chu khong phai chi thi. Nen cau hoi that cua bot khong nhung bi day ra xa,
+    ma con bi gan nhan "chi la tai lieu".
+
+    Gio moi luot la mot message that: nguoi dung -> `user`, bot -> `assistant`. Model
+    thay dung hinh dang cua mot cuoc hoi thoai, va luot ngay truoc cau hoi la thu
+    chinh no vua noi.
+    """
+    items = list(recent)
+
+    # Tin cuoi cua NGUOI DUNG chinh la cau dang duoc tra loi: stage 6 (persist) chay
+    # truoc stage 10 (recall), nen no da nam trong `recent`. De lai la hoi doi cau hoi.
+    if items and not items[-1].from_bot:
+        items.pop()
+    if not items:
+        return ()
+
+    # Cat tu DAU (cu nhat) cho vua tran, khong cat giua mot tin nhan: mot luot bi cut
+    # nua chung con kho hieu hon la khong co no.
+    limit = int(TOKEN_BUDGET["recent"] * CHARS_PER_TOKEN)
+    total = 0
+    giu: list[StoredMessage] = []
+    for item in reversed(items):
+        total += len(item.text) + len(item.sender_name) + 4
+        if total > limit and giu:
+            break
+        giu.append(item)
+    giu.reverse()
+
+    if len(giu) < len(items):
+        logger.warning(
+            "cat bot luot hoi thoai cu — kiem tra xem tran co con hop ly khong",
+            layer="recent",
+            da_bo=len(items) - len(giu),
+        )
+
+    turns: list[LlmMessage] = []
+    for item in giu:
+        if item.from_bot:
+            turns.append(AssistantMessage(content=item.text))
+        else:
+            # Trong nhom co nhieu nguoi noi: giu ten de model biet ai hoi gi. Trong
+            # hoi thoai 1-1 thi cai ten do chi la nhieu.
+            name = f"[{item.sender_name}]: " if is_group else ""
+            turns.append(UserMessage(content=f"{name}{item.text}"))
+    return tuple(turns)
+
+
 def build_context(data: ContextInput, logger: LoggerPort) -> ContextEnvelope:
     trimmed: dict[str, int] = {}
-    history: list[str] = []
+    background: list[str] = []
 
-    # --- Vung HISTORY: on dinh nhat truoc, tuoi nhat sau ---
+    # --- Vung NEN: tai lieu, ghi nho, tom tat. On dinh nhat truoc. ---
+    #
+    # Ba thu nay THAT SU la du lieu tham khao, nen chung o lai trong mot khoi rieng.
+    # Lich su hoi thoai thi khong — xem conversation_turns().
     knowledge = render_knowledge(data.chunks)  # tu ap tran tang 'knowledge'
     if knowledge:
-        history.append(knowledge)
+        background.append(knowledge)
 
     facts = render_facts(data.facts)  # tu ap tran tang 'facts'
     if facts:
-        history.append(facts)
+        background.append(facts)
 
     if data.summary:
         summary = _fit(data.summary, "summary", logger, trimmed)
-        history.append(f"<tom_tat_truoc_do>\n{summary}\n</tom_tat_truoc_do>")
-
-    if data.recent:
-        recent = render_recent(data.recent, data.is_group)
-        history.append(f"<hoi_thoai_gan_day>\n{recent}\n</hoi_thoai_gan_day>")
+        background.append(f"<tom_tat_truoc_do>\n{summary}\n</tom_tat_truoc_do>")
 
     # --- Vung CURRENT INPUT: dat CUOI CUNG, sat cau tra loi nhat ---
     question = _fit(data.question, "question", logger, trimmed)
 
-    # History va Current input di trong hai message tach biet: model phan biet duoc
-    # "nen" voi "viec can lam bay gio". Gop lam mot thi cau hoi chim trong ngu canh.
-    messages: tuple[LlmMessage, ...]
-    if history:
-        messages = (
-            UserMessage(content="\n\n".join(history)),
-            AssistantMessage(content="Mình đã đọc phần thông tin nền. Bạn hỏi gì?"),
-            UserMessage(content=question),
-        )
-    else:
-        messages = (UserMessage(content=question),)
+    messages: list[LlmMessage] = []
+    if background:
+        messages.append(UserMessage(content="\n\n".join(background)))
+        messages.append(AssistantMessage(content="Mình đã đọc phần thông tin nền."))
 
-    return ContextEnvelope(system=SYSTEM_PROMPT, messages=messages, trimmed=trimmed)
+    messages.extend(conversation_turns(data.recent, data.is_group, logger))
+    messages.append(UserMessage(content=question))
+
+    return ContextEnvelope(system=SYSTEM_PROMPT, messages=tuple(messages), trimmed=trimmed)

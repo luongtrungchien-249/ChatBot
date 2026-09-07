@@ -2,35 +2,181 @@
 <html lang="vi">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <title>{{ bot_name }}</title>
+
+    {#
+      Chon nen sang/toi TRUOC khi trang ve. Dat trong <head> va chay dong bo la co y:
+      de xuong duoi thi trang kip ve mot khung mau sang roi doi sang toi — mot nhay
+      trang vao mat nguoi dung o moi lan tai.
+    #}
+    <script>
+      try {
+        var t = localStorage.getItem('cp-theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {
+        /* Trinh duyet chan localStorage: cu theo he dieu hanh, khong phai loi. */
+      }
+    </script>
+
     <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%233b5bdb'/><text x='16' y='22' font-family='sans-serif' font-size='16' font-weight='700' fill='white' text-anchor='middle'>C</text></svg>"
+    />
   </head>
+
   <body>
-    <div class="app">
-      <aside class="sidebar">
-        <button class="new-chat" id="new-chat">+ Cuộc trò chuyện mới</button>
+    {#
+      Bo icon nam mot cho, dung lai bang <use>. Ve tay tung SVG o moi nut thi doi
+      mot net la phai sua sau cho, va se co cho bi bo sot.
+    #}
+    <svg hidden xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <g id="i-sidebar" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+        </g>
+        <g id="i-plus" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14" />
+        </g>
+        <g id="i-pencil" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </g>
+        <g id="i-trash" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+        </g>
+        <g id="i-copy" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="12" height="12" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+        </g>
+        <g id="i-send" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h15M13 6l6 6-6 6" />
+        </g>
+        <g id="i-stop" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="7" width="10" height="10" rx="2" />
+        </g>
+        <g id="i-chevron" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m9 6 6 6-6 6" />
+        </g>
+        <g id="i-sun" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </g>
+        <g id="i-moon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+        </g>
+        <g id="i-alert" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v5M12 16h.01" />
+        </g>
+      </defs>
+    </svg>
+
+    <div class="app" id="app">
+      <button class="sidebar-scrim" id="scrim" aria-label="Đóng danh sách hội thoại"></button>
+
+      <aside class="sidebar" id="sidebar" aria-label="Hội thoại">
+        <div class="sidebar-head">
+          <div class="logo">
+            <span class="logo-mark" aria-hidden="true">{{ bot_name[:1] }}</span>
+            <span class="logo-text">{{ bot_name }}</span>
+          </div>
+          <button class="icon-btn" id="collapse" title="Ẩn danh sách" aria-label="Ẩn danh sách">
+            <svg class="icon"><use href="#i-sidebar" /></svg>
+          </button>
+        </div>
+
+        <button class="new-chat" id="new-chat">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
+          Cuộc trò chuyện mới
+          <kbd>Ctrl K</kbd>
+        </button>
+
         <div class="section-label">Gần đây</div>
-        <nav class="thread-list" id="thread-list"></nav>
-        <div class="brand">{{ bot_name }}</div>
+        <nav class="thread-list" id="thread-list" aria-label="Hội thoại gần đây"></nav>
+
+        <div class="sidebar-foot">
+          {# Cham nay la thu duy nhat noi cho nguoi dung biet trang con nghe duoc
+             cau tra loi hay khong. Mat SSE ma khong bao thi bot trong nhu da chet. #}
+          <span class="status">
+            <span class="dot off" id="dot" aria-hidden="true"></span>
+            <span id="status-text">Đang kết nối…</span>
+          </span>
+          <button class="icon-btn" id="theme" title="Đổi nền sáng/tối" aria-label="Đổi nền sáng/tối">
+            <svg class="icon"><use href="#i-moon" id="theme-icon" /></svg>
+          </button>
+        </div>
       </aside>
 
       <main class="main">
-        <div class="hero" id="hero"><h1>Hôm nay bạn cần gì?</h1></div>
+        <header class="topbar">
+          <button class="icon-btn" id="open-sidebar" title="Hiện danh sách" aria-label="Hiện danh sách">
+            <svg class="icon"><use href="#i-sidebar" /></svg>
+          </button>
+          <div class="topbar-title" id="topbar-title">Cuộc trò chuyện mới</div>
+          <div class="topbar-sub" id="topbar-sub"></div>
+        </header>
 
-        <div class="messages" id="messages" hidden>
-          <div id="message-list"></div>
-          <div class="steps" id="steps" hidden></div>
-          <div id="bottom"></div>
+        {# aria-live: trinh doc man hinh phai doc cau tra loi khi no ve, vi no ve
+           bat dong bo qua SSE chu khong theo mot thao tac cua nguoi dung. #}
+        <div class="scroll" id="scroll">
+          <div class="hero" id="hero">
+            <div class="hero-mark" aria-hidden="true">{{ bot_name[:1] }}</div>
+            <h1>Hôm nay bạn cần gì?</h1>
+            <p>
+              Mình trả lời dựa trên tài liệu nội bộ đã nạp, tra cứu web và tìm bài báo
+              khoa học khi cần. Mình nhớ những điều bạn chủ động nói ra, riêng cho từng
+              cuộc trò chuyện.
+            </p>
+            <div class="suggestions" id="suggestions"></div>
+          </div>
+
+          <div class="column" id="column" hidden>
+            <div class="banner" id="error" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-alert" /></svg>
+              <span id="error-text"></span>
+            </div>
+            <div id="message-list" aria-live="polite" aria-atomic="false"></div>
+            <div class="trace open" id="trace" hidden>
+              <button class="trace-head" id="trace-head" aria-expanded="true">
+                <span id="trace-label">Đang tra cứu…</span>
+                <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+              </button>
+              <div class="trace-steps" id="trace-steps"></div>
+            </div>
+            <div class="thinking" id="thinking" hidden>
+              <span class="avatar" aria-hidden="true">{{ bot_name[:1] }}</span>
+              <span class="thinking-dots" aria-label="Đang soạn câu trả lời"><i></i><i></i><i></i></span>
+            </div>
+            <div id="bottom"></div>
+          </div>
         </div>
 
-        <div class="error" id="error" hidden></div>
-
-        <form class="composer" id="composer" autocomplete="off">
-          <input id="draft" placeholder="Hỏi bất cứ điều gì" autofocus />
-          <button type="submit" id="send" disabled>Gửi</button>
-          <button type="button" id="stop" class="stop" hidden>Dừng</button>
-        </form>
+        <div class="composer-wrap">
+          <form class="composer" id="composer" autocomplete="off">
+            <label class="sr-only" for="draft">Câu hỏi</label>
+            <textarea
+              id="draft"
+              rows="1"
+              placeholder="Hỏi bất cứ điều gì…"
+              autofocus
+            ></textarea>
+            <button class="send" type="submit" id="send" disabled aria-label="Gửi">
+              <svg class="icon" aria-hidden="true"><use href="#i-send" /></svg>
+            </button>
+            <button class="stop" type="button" id="stop" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-stop" /></svg>
+              Dừng
+            </button>
+          </form>
+          <p class="composer-hint">
+            <kbd>Enter</kbd> gửi · <kbd>Shift Enter</kbd> xuống dòng · Câu trả lời có thể
+            chưa chính xác, hãy kiểm tra lại thông tin quan trọng.
+          </p>
+        </div>
       </main>
     </div>
 

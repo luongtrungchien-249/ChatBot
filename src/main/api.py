@@ -5,7 +5,7 @@ TUYET DOI khong cho LLM o day — pipeline chay ben worker.
 Giao dien do chinh process nay render (Jinja2) va phuc vu tep tinh. Khong con buoc
 build, khong con Node: sua giao dien la tai lai trang.
 
-TODO(giai-doan-4): route webhook Zalo. TODO(giai-doan-5): Meta + HMAC tren RAW body.
+TODO(webhook-zalo): route webhook. Dang dung polling — xem adapters/zalo_bot/polling.py.
 """
 
 import time
@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from adapters.web.routes import WEB_ROOT, require_localhost, router
 from config import get_settings
 from infra.db import close_db
+from infra.http import close_http
 from infra.logger import configure_logging, get_logger
 from infra.queue import close_queue
 from infra.redis_client import close_redis
@@ -36,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await close_queue()
     await close_db()
     await close_redis()
+    await close_http()
 
 
 app = FastAPI(title="CP Assistant", lifespan=lifespan)

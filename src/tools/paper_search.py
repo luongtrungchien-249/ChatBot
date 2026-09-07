@@ -12,6 +12,7 @@ KHONG DUOC LAM HONG CA LOI GOI. Ba nguon con lai van du de tra loi.
 
 import asyncio
 import re
+from collections.abc import Coroutine
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -20,9 +21,22 @@ import httpx
 from agents.ports.logger import LoggerPort
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
+from infra.http import get_http
 
 _TIMEOUT_S = 15.0
 _PER_SOURCE_TIMEOUT_S = 10.0
+
+#: Han cho MEM: da co ket qua roi thi khong doi nguon cham nua.
+#:
+#: `asyncio.gather` doi CA BON nguon, nen do tre cua ca lan tim bang do tre cua nguon
+#: CHAM NHAT. Do that trong log: nguon khoe tra ve sau 2,4-3,2s, nhung ca lan goi lai
+#: mat dung 10.016ms va 10.014ms — tuc mot nguon treo den het `_PER_SOURCE_TIMEOUT_S`
+#: va ba nguon kia ngoi cho no. Duong nay nam trong vong ReAct, tren duong phan hoi.
+#:
+#: 6s la han MEM: het 6 giay ma DA co it nhat mot nguon tra ve thi lay luon, huy phan
+#: con lai. Chua co gi thi van cho tiep den `_PER_SOURCE_TIMEOUT_S` — thieu mot bai
+#: bao con hon khong co bai nao.
+_SOFT_DEADLINE_S = 6.0
 
 #: Retry MOT lan khi bi 429, va chi khi bi 429.
 #:
@@ -96,10 +110,12 @@ def _clean(text: str) -> str:
 async def _get_json(
     client: httpx.AsyncClient, url: str, headers: dict[str, str] | None = None
 ) -> Any:
-    response = await client.get(url, headers=headers or {})
+    # timeout theo TUNG lan goi: client dung chung khong dat timeout mac dinh, vi mot
+    # vong long-poll 25 giay va mot lan tra cuu 10 giay khong dung chung mot con so.
+    response = await client.get(url, headers=headers or {}, timeout=_PER_SOURCE_TIMEOUT_S)
     if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
         await asyncio.sleep(_RETRY_429_DELAY_S)
-        response = await client.get(url, headers=headers or {})
+        response = await client.get(url, headers=headers or {}, timeout=_PER_SOURCE_TIMEOUT_S)
     if response.status_code != httpx.codes.OK:
         raise RuntimeError(f"HTTP {response.status_code}")
     return response.json()
@@ -144,7 +160,8 @@ async def _from_openalex(client: httpx.AsyncClient, query: str, n: int) -> list[
 
 async def _from_arxiv(client: httpx.AsyncClient, query: str, n: int) -> list[Paper]:
     response = await client.get(
-        f"http://export.arxiv.org/api/query?search_query=all:{query}&max_results={n}"
+        f"http://export.arxiv.org/api/query?search_query=all:{query}&max_results={n}",
+        timeout=_PER_SOURCE_TIMEOUT_S,
     )
     if response.status_code != httpx.codes.OK:
         raise RuntimeError(f"HTTP {response.status_code}")
@@ -272,6 +289,53 @@ def _merge(groups: list[list[Paper]]) -> list[Paper]:
     )
 
 
+async def _fan_out(
+    coros: tuple[Coroutine[Any, Any, list[Paper]], ...],
+    names: tuple[str, ...],
+    trace_id: str,
+    logger: LoggerPort | None,
+) -> list[list[Paper] | BaseException]:
+    """Chay bon nguon song song, nhung KHONG doi nguon cham nhat neu da co ket qua.
+
+    Khac `asyncio.gather`: gather doi tat ca, nen mot nguon treo 10 giay lam ca lan
+    tim mat 10 giay du ba nguon kia da xong tu giay thu ba.
+
+    Nguon bi huy tra ve TimeoutError — cho goi da xu ly BaseException nhu mot nguon
+    that bai, nen no vao thang duong "mot nguon chet khong lam hong ca loi goi".
+    """
+    tasks = [asyncio.create_task(c, name=n) for c, n in zip(coros, names, strict=True)]
+
+    done, pending = await asyncio.wait(tasks, timeout=_SOFT_DEADLINE_S)
+
+    # Chua nguon nao THANH CONG thi cho tiep — thieu mot bai bao con hon khong co bai
+    # nao. `done` co the chi chua nhung task da nem loi.
+    if pending and not any(t.exception() is None for t in done):
+        them, pending = await asyncio.wait(
+            pending,
+            timeout=_PER_SOURCE_TIMEOUT_S - _SOFT_DEADLINE_S,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        done |= them
+
+    for task in pending:
+        task.cancel()
+    if pending and logger is not None:
+        logger.info(
+            "bo qua nguon cham — da co ket qua tu nguon khac",
+            trace_id=trace_id,
+            bo_qua=[t.get_name() for t in pending],
+        )
+
+    ket_qua: list[list[Paper] | BaseException] = []
+    for task in tasks:
+        if task in pending:
+            ket_qua.append(TimeoutError(f"{task.get_name()} qua cham, da bo qua"))
+        else:
+            loi = task.exception()
+            ket_qua.append(loi if loi is not None else task.result())
+    return ket_qua
+
+
 async def run_paper_search(
     payload: dict[str, Any], trace_id: str, logger: LoggerPort | None = None
 ) -> str:
@@ -283,15 +347,21 @@ async def run_paper_search(
     max_results = min(max(raw_max, 1), 15) if isinstance(raw_max, int) else 8
     per_source = min(max_results + 2, 15)
 
-    async with httpx.AsyncClient(timeout=_PER_SOURCE_TIMEOUT_S, follow_redirects=True) as client:
-        names = ("OpenAlex", "arXiv", "Semantic Scholar", "Crossref")
-        outcomes = await asyncio.gather(
+    # Pool dung chung cho ca process (infra/http.py). Bon nguon chay song song tren
+    # cung mot pool — do la ly do _LIMITS o do de max_connections rong.
+    client = get_http()
+    names = ("OpenAlex", "arXiv", "Semantic Scholar", "Crossref")
+    outcomes = await _fan_out(
+        (
             _from_openalex(client, query, per_source),
             _from_arxiv(client, query, per_source),
             _from_semantic_scholar(client, query, per_source),
             _from_crossref(client, query, per_source),
-            return_exceptions=True,
-        )
+        ),
+        names,
+        trace_id,
+        logger,
+    )
 
     ok: list[list[Paper]] = []
     failed: list[str] = []

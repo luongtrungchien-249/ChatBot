@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from agents.domain.message import StoredMessage
-from agents.domain.thread import ThreadScope, user_subject
+from agents.domain.thread import ThreadScope, thread_subject, user_subject
 from agents.ports.memory import Fact, NewFact, NewMessage
 from infra.db import fetch
 from infra.logger import get_logger
@@ -163,7 +163,18 @@ class MessageRepository:
     # `memory_fact` o file nay — do la luat L4, va ops/guard_sql.py cuong che no.
 
     async def facts(self, scope: ThreadScope, subject_id: str, query: str) -> list[Fact]:
-        return await fact_repo.search_facts(scope, subject_id, query)
+        """Fact ve NGUOI hoi, cong fact chung cua CA NHOM.
+
+        Fact `thread:*` truoc day ghi duoc nhung khong duong nao doc ra — chung
+        khong bao gio vao prompt. Gop o day chu khong them mot lan goi port nua:
+        mot cau truy van, mot lan embed.
+
+        Ca hai deu bi rang buoc boi `scope`, nen hang rao chong ro ri cross-group
+        khong he noi long.
+        """
+        return await fact_repo.search_facts_for(
+            scope, [subject_id, thread_subject(scope.thread_id)], query
+        )
 
     async def remember(self, scope: ThreadScope, fact: NewFact) -> None:
         await fact_repo.remember(scope, fact)

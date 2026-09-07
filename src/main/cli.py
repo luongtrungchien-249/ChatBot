@@ -9,16 +9,22 @@ trien ma khong mua duoc gi.
 """
 
 import asyncio
+import getpass
 import sys
 from pathlib import Path
 
 from adapters.cli.normalize import CLI_MAX_MESSAGE_CHARS, normalize_cli_input
 from agents.domain.thread import Platform, ThreadScope
 from agents.pipeline.handle_message import Failed, handle_message
+from config import get_settings
 from infra.allowlist import allow_thread, deny_thread, list_threads
 from infra.db import close_db, execute, fetch, transaction
+from infra.http import close_http
 from infra.logger import configure_logging, get_logger
+from infra.metrics import budget_today, cache_stats, message_stats, route_stats
 from infra.redis_client import close_redis
+from knowledge.ingest.extract import SUPPORTED, UnsupportedDocumentError
+from knowledge.ingest.pipeline import ingest_file
 from memory.repository.fact_repo import dump_thread
 
 from .container import build_deps
@@ -98,7 +104,7 @@ async def chat() -> None:
             log.error("luot chat that bai", trace_id=msg.trace_id, error=str(result.error))
 
 
-_PLATFORMS: tuple[Platform, ...] = ("zalo_bot", "zalo_personal", "messenger", "cli", "web")
+_PLATFORMS: tuple[Platform, ...] = ("zalo_bot", "zalo_personal", "cli", "web")
 
 
 async def allowlist_command(command: str, args: list[str]) -> int:
@@ -167,6 +173,103 @@ async def memory_dump(args: list[str]) -> int:
     return 0
 
 
+async def ingest_command(args: list[str]) -> int:
+    """`ingest <duong-dan> [ten hien thi]` — nap tai lieu vao knowledge base.
+
+    CHI ADMIN. Cuong che bang chinh cho dat lenh nay: khong co route HTTP nao goi
+    toi ingest_file(), nen ai chay duoc lenh tren may chu thi moi nap duoc.
+    Moi lan nap ghi lai nguoi nap vao kb_document.ingested_by (master-plan 3.4).
+    """
+    if not args:
+        print("Dung: ingest <duong-dan> [ten hien thi]", file=sys.stderr)
+        print(f"Duoi ho tro: {', '.join(SUPPORTED)}", file=sys.stderr)
+        return 1
+
+    path = Path(args[0]).expanduser()
+    if not path.is_file():
+        print(f"Khong thay tep: {path}", file=sys.stderr)
+        return 1
+
+    title = " ".join(args[1:]) or None
+    # Ten nguoi nap: ghi lai ai da dua tai lieu nao vao. Khong co he thong tai khoan
+    # nen lay ten dang nhap he dieu hanh — du de truy khi can, va trung thuc ve viec
+    # no khong phai mot danh tinh da xac thuc.
+    try:
+        result = await ingest_file(path, ingested_by=f"cli:{getpass.getuser()}", title=title)
+    except (UnsupportedDocumentError, ValueError) as error:
+        print(f"Khong nap duoc: {error}", file=sys.stderr)
+        return 1
+
+    if result.skipped:
+        print(f"Tai lieu khong doi (ban {result.version}), khong nap lai.")
+        return 0
+
+    print(f'Da nap "{result.title}" ban {result.version}: {result.chunks} chunk.')
+    print(
+        "Neu day la tai lieu DAU TIEN, khoi dong lai worker de cong cu "
+        "search_knowledge_base duoc khai bao."
+    )
+    return 0
+
+
+async def stats_command(args: list[str]) -> int:
+    """`stats [so-ngay]` — tien di dau, cham o dau, cache co an khong.
+
+    Doc thang tu `usage_log`, khong can dung Grafana hay Prometheus. Bang do da co
+    du lieu that tu ngay dau; mot lenh doc no dung duoc ngay hom nay, con dashboard
+    thi la buoc sau.
+    """
+    try:
+        days = int(args[0]) if args else 7
+    except ValueError:
+        print("So ngay phai la mot so nguyen.", file=sys.stderr)
+        return 1
+
+    settings = get_settings()
+    spent, budget = await budget_today(settings.DAILY_BUDGET_USD)
+    print(f"Hom nay: ${spent:.4f} / ${budget:.2f} ngan sach ({spent / budget * 100:.0f}%)")
+
+    routes = await route_stats(days)
+    if not routes:
+        print(f"\nChua co lan goi nao trong {days} ngay qua.")
+        return 0
+
+    print(f"\n{days} ngay qua, theo route:")
+    header = f"  {'route':<14}{'goi':>6}{'loi':>5}{'in':>10}{'out':>9}{'cache':>9}"
+    print(f"{header}{'USD':>10}{'tb ms':>8}{'p95 ms':>8}")
+    for r in routes:
+        print(
+            f"  {r.route:<14}{r.calls:>6}{r.errors:>5}{r.input_tokens:>10}"
+            f"{r.output_tokens:>9}{r.cache_read_tokens:>9}"
+            f"{r.cost_usd:>10.4f}{r.avg_latency_ms:>8}{r.p95_latency_ms:>8}"
+        )
+    print(f"  {'TONG':<14}{sum(r.calls for r in routes):>6}"
+          f"{sum(r.errors for r in routes):>5}{'':>28}"
+          f"{sum(r.cost_usd for r in routes):>10.4f}")
+
+    cache = await cache_stats(days)
+    if cache.total_calls:
+        ti_le = cache.calls_with_cache / cache.total_calls * 100
+        print(
+            f"\nPrompt caching: {cache.calls_with_cache}/{cache.total_calls} luot "
+            f"({ti_le:.0f}%), trung binh {cache.avg_cached_tokens} token doc tu cache."
+        )
+        if cache.calls_with_cache == 0:
+            # Khong phai canh bao cho vui: mat cache la tra gia day du cho ~1500
+            # token o MOI cau hoi, va khong co dong nao khac bao dieu do.
+            print(
+                "  CANH BAO: khong luot nao an cache. Kiem xem SYSTEM_PROMPT co bi "
+                "noi suy bien vao khong (agents/prompt/system.py)."
+            )
+
+    messages = await message_stats(days)
+    if messages:
+        print("\nTin nhan theo ngay (vao / bot tra loi):")
+        for ngay, vao, ra in messages:
+            print(f"  {ngay}  {vao:>5} / {ra:<5}")
+    return 0
+
+
 async def main() -> int:
     configure_logging()
     command = sys.argv[1] if len(sys.argv) > 1 else "chat"
@@ -180,10 +283,14 @@ async def main() -> int:
             return await allowlist_command(command, sys.argv[2:])
         elif command == "memory":
             return await memory_dump(sys.argv[2:])
+        elif command == "ingest":
+            return await ingest_command(sys.argv[2:])
+        elif command == "stats":
+            return await stats_command(sys.argv[2:])
         else:
             print(
                 f"Lenh khong biet: {command}. "
-                "Co: migrate | chat | allow | deny | allowed | memory",
+                "Co: migrate | chat | allow | deny | allowed | memory | ingest | stats",
                 file=sys.stderr,
             )
             return 1
@@ -191,7 +298,7 @@ async def main() -> int:
     finally:
         # Ca migrate lan chat deu ket thuc duoc, nen luon dong ket noi — con treo mot
         # pool Postgres la process khong bao gio thoat.
-        await asyncio.gather(close_db(), close_redis(), return_exceptions=True)
+        await asyncio.gather(close_db(), close_redis(), close_http(), return_exceptions=True)
 
 
 if __name__ == "__main__":

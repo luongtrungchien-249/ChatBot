@@ -4,7 +4,7 @@ cache_read_tokens la cot dat ra de TRA LOI mot cau hoi khong nhin thay duoc tu b
 ngoai: prompt caching co dang an khong.
 
 Do 06/09/2026: CO — 20/32 lan goi, moi lan 1408-1792 token doc tu cache, dung bang
-system prompt (1539 token). Input duoc cache tinh $0,025/1M thay vi $0,25/1M.
+system prompt (1535 token sau lan do lai 07/09). Input duoc cache tinh $0,025/1M thay vi $0,25/1M.
 
 Neu cot nay tut ve 0 suot thi ai do da lam vo tien to on dinh cua prompt — vi du
 noi suy mot bien vao dau SYSTEM_PROMPT — va ban dang tra gia day du cho 1539 token

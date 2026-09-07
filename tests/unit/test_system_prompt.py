@@ -28,8 +28,11 @@ class TestBoCucNamKhoi:
 
     def test_co_phan_few_shot(self) -> None:
         assert "# VÍ DỤ" in SYSTEM_PROMPT
-        # Bon vi du: khong tim thay, trich nguon, tu choi chi thi nhung, tu choi lo cau hinh.
-        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 4
+        # Sau vi du: khong tim thay, trich nguon, CHON MAC DINH thay vi hoi nguoc,
+        # tu choi chi thi nhung, tu choi lo cau hinh, va KHONG hoi lai hai luot lien
+        # tiep. Hai vi du cuoi them ngay 07/09/2026 sau khi do duoc vong hoi lai vo
+        # tan tren bot that — xem docs/plan-thi-cong.md section 18.
+        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 6
 
 
 class TestLuatAnToan:

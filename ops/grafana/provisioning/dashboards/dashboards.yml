@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: cp-assistant
+    type: file
+    disableDeletion: true
+    # Dashboard la MA NGUON, khong phai thu chinh trong giao dien roi quen.
+    # Sua trong Grafana thi export lai JSON va commit — neu khong, lan dung stack
+    # tiep theo se xoa sach thay doi do.
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

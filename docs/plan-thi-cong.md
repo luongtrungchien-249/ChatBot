@@ -77,13 +77,14 @@ trên tài liệu của tổ chức (RAG), nhớ được thông tin người d�
 | **0** | Khôi phục 107 file, lockfile, CI, canary chứng minh các luật kiến trúc | Xong |
 | **1** | `shared/` `prompt/` `infra/` `llm/` `adapters/cli/` pipeline `main/` | Xong |
 | **2** | Ba tầng prompt + 5 khối + few-shot + context engineering; web adapter + UI + SSE | Xong |
-| **3** | Tool layer + ReAct, 6 chặn cứng, 6 lớp chống injection | Xong, **trừ `web_search`** — đã viết nhưng chưa chạy lần nào, thiếu `TAVILY_API_KEY` |
+| **3** | Tool layer + ReAct, 6 chặn cứng, 6 lớp chống injection | **Xong hoàn toàn 07/09/2026** — `web_search` đã chạy thật lần đầu sau khi có `TAVILY_API_KEY` |
 | **P** | **Chuyển toàn bộ TypeScript → Python** | **Xong** — không còn dòng TypeScript nào |
 | **4** | Zalo Bot adapter | **Xong** — cả tin riêng lẫn nhóm; rate limit 3 tầng; allowlist qua CLI |
-| **5** | Messenger adapter | Chưa |
-| **6** | RAG | Chưa |
+| **5** | ~~Messenger adapter~~ | **BỎ khỏi phạm vi 07/09/2026** — chỉ tích hợp Zalo. Gói `adapters/messenger/`, ba biến `META_*` và giá trị `Platform` tương ứng đã bị xoá |
+| **6** | RAG | **Xong 07/09/2026** — ingest (txt/md/pdf/docx), hybrid vector + BM25, RRF, rerank, công cụ `search_knowledge_base` |
 | **7** | Memory L2 + L3 | **Xong** — L2, L3 explicit, L3 implicit (viết xong, `MEMORY_IMPLICIT_ENABLED=false`) |
-| **8** | Eval + monitoring + go-live | Chưa |
+| **8** | Eval + monitoring | **Xong 07/09/2026** — runner + workflow nightly, `cli stats`, `/api/metrics`, dashboard Grafana. **Còn thiếu 50 câu hỏi viết tay** |
+| **9** | Thiết kế lại giao diện web | **Xong 07/09/2026** — xem §17 |
 
 ### 2b. Giai đoạn P — chuyển sang Python (xong 06/09/2026)
 
@@ -202,20 +203,25 @@ khi chạy `0001`.
 | `0005_ops.sql` | `usage_log`, `thread_allowlist`, `schema_migration` | Vận hành |
 | `0006_message_direction.sql` | cột `from_bot` | Câu trả lời của bot cũng phải lưu |
 | `0007_thread_meta.sql` | `thread_meta` | Tên hội thoại do người dùng đặt. Bảng riêng: tên thuộc về cả thread, và `thread_summary` do **model** sinh nên job tóm tắt sẽ ghi đè |
+| `0008_kb_tsv_embed_input.sql` | cột `kb_chunk.tsv` | Sinh `tsv` từ `embed_input` thay vì `content`, để **tên mục cũng tìm được** bằng BM25. Xem §8 |
 
 **Không gian khoá Redis** — mọi khoá đều có TTL, không cái nào là nguồn thật:
 
 `dedup:{platform}:{message_id}` 10ph · `replied:{platform}:{message_id}` 1h ·
 `ctx:{platform}:{thread_id}` 2h · `rl:u:*` `rl:t:*` 1ph · `cost:day:{YYYY-MM-DD}` 48h ·
-`emb:{sha256}` 24h · `web:out:{threadId}` pub/sub · `bull:*`
+`emb:{sha256}` 24h · `web:out:{threadId}` pub/sub · `cancel:{platform}:{thread_id}` 3ph ·
+`forget:{platform}:{thread_id}:{actor}` 5ph · `rl:warn:*` 5ph · `arq:*`
+
+Khoá `emb:` có **cả tên model và số chiều** trong phần băm: đổi model mà dùng chung khoá
+là đọc ra vector của model cũ, và kết quả tìm kiếm sai một cách hoàn toàn im lặng.
 
 ---
 
 ## 5. Giai đoạn 3 — Tool layer + ReAct
 
-`paper_search` đã chạy thật (6 bài báo kèm DOI đúng). `web_search` đã viết xong nhưng **chưa chạy lần nào** —
-`TAVILY_API_KEY` còn trống nên `tools.specs()` không khai nó ra, và bot mô tả năng lực của mình đúng theo
-thực tế đó.
+`paper_search` đã chạy thật (6 bài báo kèm DOI đúng). `web_search` **đã chạy thật từ 07/09/2026**, sau
+khi có `TAVILY_API_KEY`: `tools.specs()` khai đủ hai công cụ, và trong một vòng ReAct thật model tự chọn
+`web_search` cho câu hỏi tỷ giá rồi trả lời kèm tên trang và đường dẫn.
 
 ### 5.1 ReAct nằm ở đâu
 
@@ -349,7 +355,7 @@ khớp, và test chốt cả hai dạng.
 
 | Việc | Ghi chú |
 |---|---|
-| **`web_search` chưa chạy thật lần nào** | `TAVILY_API_KEY` còn trống — **việc duy nhất còn lại, và cần khoá của bạn**. `paper_search` không cần khoá nên đã kiểm chứng đầy đủ |
+| ~~`web_search` chưa chạy thật lần nào~~ | **Đã chạy 07/09/2026** sau khi có `TAVILY_API_KEY`. Kiểm chứng qua vòng ReAct thật: hỏi tỷ giá USD/VND → model tự gọi `web_search` → trả lời kèm nguồn và đường dẫn, 4,0s cho lần gọi công cụ |
 | `LlmPort.cheap()` / `instructions.py` cho `rewrite`, `summarize`, `extract_facts` | Đúng lịch — thuộc Giai đoạn 6–7. Riêng `COMPRESS_TOOL_RESULT` đã dùng thật |
 
 **Đã bổ sung sau đợt rà soát:**
@@ -453,74 +459,150 @@ webhook chỉ là vài dòng khi có tài liệu.
 
 ---
 
-## 7. Giai đoạn 5 — Messenger adapter
+## 7. Giai đoạn 5 — Messenger: **đã bỏ khỏi phạm vi (07/09/2026)**
 
-| File | Nội dung |
+Quyết định của chủ dự án: chỉ tích hợp **Zalo**. Messenger không còn nằm trong kế hoạch.
+
+Đã dọn sạch chứ không để lại chỗ chờ, vì một placeholder không ai xoá sẽ được người
+đọc sau hiểu là "sắp làm":
+
+| Thứ | Xử lý |
 |---|---|
-| `verify.py` | GET, so `hub.verify_token` → echo `hub.challenge` |
-| `webhook.py` | POST + **HMAC-SHA256 `X-Hub-Signature-256` trên RAW body, TRƯỚC khi parse JSON** |
-| `normalize.py` | payload Meta → `InboundMessage` |
-| `send.py` | `sender_action: typing_on`, chunk **2000 ký tự** |
+| `src/adapters/messenger/` | Xoá (gói rỗng) |
+| `META_APP_SECRET` `META_PAGE_TOKEN` `META_VERIFY_TOKEN` | Xoá khỏi `config/schema.py` và `.env.example` |
+| `Platform = Literal[..., "messenger", ...]` | Xoá giá trị đó — kiểu giờ chỉ còn `zalo_bot`, `zalo_personal`, `cli`, `web` |
+| Hợp đồng `L5: moi adapter la mot hop kin` | Bỏ `adapters.messenger` khỏi danh sách |
+| `SYSTEM_PROMPT` | Bỏ hai câu nói bot hoạt động trên Messenger — nó **nói sai về năng lực của chính mình**. Đo lại: 1539 → **1535 token** |
+| Bình luận trong `channel.py`, `respond.py`, `send.py`, `worker.py` | Đổi mốc "Messenger 2000 ký tự" thành "Zalo 2000 ký tự" |
 
-**Bẫy số một:** nhận `body: Model` như route FastAPI thường là JSON đã được parse rồi. HMAC phải tính
-trên `await request.body()` — **bytes thô, trước khi parse**. Không có nó thì HMAC luôn sai và bạn debug
-nhầm chỗ cả ngày.
+Giữ lại `zalo_personal` trong `Platform`: nó vẫn là đường dự phòng nếu Bot Platform
+không đáp ứng được nhóm (master-plan phần IV), và giữ một giá trị Literal thì không
+tốn gì.
 
-Contract test bắt buộc có case **chữ ký sai → 401**, không chỉ happy path.
-
-Ràng buộc nền tảng phải code: **cửa sổ 24 giờ** — trả lời trong luồng thì được, chủ động nhắn ngoài
-cửa sổ thì không.
-
-**Việc hành chính:** Business Verification khởi động **ngày đầu** (mất vài ngày, làm được khi chưa có
-code). Cuối giai đoạn: quay screencast luồng thật → nộp App Review. Nộp app rỗng ngay từ đầu là tự
-chuốc lấy đúng rủi ro "hay bị từ chối lần đầu".
+**Việc hành chính bên Meta — Business Verification, App Review — huỷ hết.** Đó là
+đường găng dài nhất của kế hoạch cũ, và bỏ Messenger là bỏ luôn nó.
 
 ---
 
-## 8. Giai đoạn 6 — RAG
+## 8. Giai đoạn 6 — RAG — **đã làm (07/09/2026)**
 
-### Chốt nhà cung cấp trước khi viết code
+| File | Nội dung |
+|---|---|
+| `knowledge/ingest/extract.py` | `.txt` `.md` `.pdf` `.docx` → văn bản, **giữ ranh giới đoạn và tiêu đề** |
+| `knowledge/ingest/chunk.py` | Cắt theo heading → đoạn → câu, 700 token, overlap 100 |
+| `knowledge/ingest/pipeline.py` | extract → chunk → contextualize → embed theo lô → upsert trong **một transaction** |
+| `knowledge/retrieve/search.py` | Hai đường tìm + cache embedding câu hỏi |
+| `knowledge/retrieve/fusion.py` | RRF k=60 |
+| `knowledge/retrieve/service.py` | `KnowledgePort` đầy đủ: song song → RRF → rerank → ngưỡng |
+| `llm/reranker.py` | `RerankerPort` — Cohere, và một bản không cần khoá |
+| `tools/knowledge_search.py` | Công cụ `search_knowledge_base` |
+| `main/cli.py` | Lệnh `ingest`, **chỉ admin** |
+| `db/migrations/0008_kb_tsv_embed_input.sql` | Sửa một lỗi im lặng — xem dưới |
 
-Ràng buộc cứng: **số chiều phải bằng 1024** để khớp `VECTOR(1024)`. OpenAI có embedding
-(`text-embedding-3-small` $0,02/1M, `-3-large` $0,13/1M có tham số `dimensions`) nhưng **không có
-rerank** → rerank phải là nhà cung cấp thứ hai (Cohere / Jina / Voyage).
+### Nhà cung cấp rerank — chốt để viết được code, chưa benchmark
 
-**Benchmark bắt buộc:** 20 câu hỏi thật trên tài liệu thật, so ít nhất hai provider. Bảng xếp hạng
-chung không nói gì về tài liệu của bạn.
+OpenAI **không có** rerank nên nó phải là nhà cung cấp thứ hai. Mặc định là **Cohere**
+(`rerank-multilingual-v3`). Đây **không phải** kết luận của một phép đo: §15 yêu cầu
+benchmark trên tài liệu thật, mà tài liệu thì chưa có — một vòng lặp chặn. Cắt vòng
+lặp bằng cách chọn một mặc định để viết được code; đổi nhà cung cấp là sửa **một file**.
 
-Bật `assertEmbeddingDim()` (đọc `atttypmod` từ `pg_attribute`) — lệch chiều thì **không cho process
-khởi động**. Không có bước này, lỗi hiện ra dưới dạng "kết quả tìm kiếm kém", ba tuần sau.
+Kèm theo là `LexicalOverlapReranker`, bản **không cần khoá**: xếp theo tỉ lệ từ của
+câu hỏi xuất hiện trong đoạn văn. Nó không phải cross-encoder và không giả vờ là một
+cái. Nó tồn tại để đường ống chạy được khi chưa mua khoá, và để test không phải gọi mạng.
+
+Ngưỡng `RERANK_MIN_SCORE = 0.35` là **chặt** với bản này: ít câu hỏi nào lặp lại 35%
+số từ của nó trong đoạn văn. Chốt nhà cung cấp thật thì phải đo lại ngưỡng.
+
+### Embedding — đã đo lại, giữ nguyên `3-large` (07/09/2026)
+
+Câu hỏi đặt ra là có hạ xuống model rẻ hơn được không. `ops/benchmark_embedding.py`
+đo cả hai ở **cùng 1024 chiều**, trên chính dữ liệu của dự án:
+
+| Model | Khoảng an toàn (dedupe) | Top-1 tìm kiếm | Biên xếp hạng | USD/1M |
+|---|---|---|---|---|
+| `text-embedding-3-large` | **+0,212** | **7/8** | **+0,074** | 0,13 |
+| `text-embedding-3-small` | +0,171 | 6/8 | +0,034 | 0,02 |
+
+`3-small` rẻ hơn 6,5 lần nhưng **kém đo được ở cả hai phép**: xếp sai 2/8 câu tìm kiếm,
+biên phân biệt tụt hơn một nửa, và `bat_min = 0,695` **nằm dưới** `DUPLICATE_THRESHOLD`
+= 0,70 đang dùng — đổi sang nó mà không hạ ngưỡng là làm hỏng chống trùng trong im lặng.
+
+Khoản tiết kiệm thì gần như bằng không: `cli stats` cho thấy `embed` chiếm **~7%** chi
+phí. Đổi model để tiết kiệm 6% của 7%, đánh đổi bằng chất lượng tìm kiếm đo được, là
+một món hời không đáng.
+
+**Chỗ cắt chi phí đúng nằm ở nơi khác, và đã làm:** cache vector câu hỏi **dùng chung**
+giữa L3 và RAG (`llm/embedder.embed_query`). Cả hai đều embed *đúng cùng một chuỗi*
+trong một lượt trả lời, mà trước đây mỗi bên gọi riêng. Đo thật: hai câu hỏi giống nhau
+tốn **2 lần gọi thay vì 4**, và câu lặp lại trong 24h thì tốn 0. Nó cũng bỏ một vòng
+mạng khỏi đường phản hồi — đáng kể khi `embed` có p95 19,9s trên trần timeout 20s.
+
+`EMBEDDING_MODEL` và `EMBEDDING_DIM` giờ **thật sự được đọc** từ `.env`
+(trước đó `llm/embedder.py` hardcode cả hai trong khi schema vẫn bắt buộc khai — đổi
+biến không đổi gì, một kiểu lệch im lặng). Model không có trong bảng giá thì process
+**không khởi động**: chạy tiếp nghĩa là `usage_log` ghi tiền theo giá của model khác.
+
+`assert_embedding_dim()` chạy **một lần** mỗi process, không phải mỗi tin nhắn.
 
 ### Ingest
 
 ```
-file → extract → chunk → contextualize → embed → upsert
+file → extract → chunk → contextualize → embed (lô 64) → upsert
 ```
 
-- `extract`: pdf/docx/md/txt. **Cần chốt thư viện** — đề xuất `pypdf` + `python-docx`.
-- `chunk`: 500–800 token, overlap 100, **cắt theo heading/đoạn**, không cắt cứng theo ký tự.
-  Đây là biến số ảnh hưởng chất lượng nhiều nhất, hơn cả việc chọn embedding model.
-- `contextualize`: thêm 1–2 câu ngữ cảnh vào `embed_input`; `content` giữ **nguyên văn** để trích dẫn.
-- CLI `ingest` **chỉ admin**, log mọi lần nạp vào `kb_document.ingested_by`.
+- **Bất biến theo phiên bản.** Nạp lại tệp không đổi → không làm gì (so checksum của
+  *văn bản đã trích*, không phải của tệp). Nội dung đổi → **phiên bản mới**, không sửa
+  bản cũ: một câu trả lời đã trích dẫn chunk 42 thì chunk 42 phải còn nguyên văn.
+- `contextualize` thêm dòng `[Tên tài liệu > Mục]` vào `embed_input`; `content` giữ
+  **nguyên văn** để trích dẫn. Làm bằng **metadata có sẵn**, không bằng một lần gọi
+  model cho từng chunk: hai cách gần bằng nhau trên tài liệu có tiêu đề rõ ràng, mà
+  cách này không tốn tiền và không thể bịa.
+- Cả tài liệu trong **một transaction**: hỏng giữa chừng mà để lại nửa số chunk nghĩa
+  là bot trả lời dựa trên nửa tài liệu mà không ai biết.
 
 ### Retrieve
 
 ```
-vector (pgvector cosine, top 20)
-lexical (tsvector qua vn_tsv, top 20)      ← chạy song song
-    → RRF fusion k=60 → top 10
-    → rerank → top 3-5 + ngưỡng RERANK_MIN_SCORE
+vector (pgvector cosine, top 20)  ─┐
+                                   ├─ RRF k=60 → top 10 → rerank → top 5 + ngưỡng
+lexical (tsvector qua vn_tsv, 20) ─┘
 ```
 
-Chỉ dùng vector là hỏng ở ca dễ nhất: mã sản phẩm, tên riêng, số hiệu văn bản.
+Hai đường chạy **song song** với `return_exceptions=True`: một đường chết không được
+làm hỏng cả lần tìm. Rerank hỏng thì giữ thứ tự RRF và **bỏ qua ngưỡng**, kèm log
+ERROR — trả về rỗng nghĩa là "không có trong tài liệu", tức là nói dối về một sự cố
+hạ tầng.
 
-**BM25 tiếng Việt là ~2 ngày công không có trong lịch gốc.** Postgres không có dictionary tiếng Việt;
-`to_tsvector('simple', …)` không bỏ dấu nên "tra cuu" không khớp "tra cứu". Hàm `vn_tsv()` trong
-`0001` đã giải quyết, nhưng phải test kỹ với dấu.
+Cache embedding câu hỏi: `emb:{sha256}` TTL 24h, khoá có **cả tên model và số chiều** —
+đổi model mà dùng chung khoá là đọc ra vector của model cũ, im lặng.
 
-Cache embedding câu hỏi lặp: `emb:{sha256(query)}` TTL 24h.
+### Một lỗi im lặng, do test bắt được
 
-**Xong khi:** trả lời có **trích dẫn nguồn**; dưới ngưỡng thì nói "không tìm thấy trong tài liệu".
+`tsv` được sinh từ `content`. Nhưng dòng tiêu đề đã bị tách sang cột `section` từ lúc
+cắt chunk, nên **văn bản tiêu đề không nằm trong chỉ mục BM25**. Tài liệu có mục
+"Nghỉ phép năm" mà thân mục không lặp lại cụm đó thì câu hỏi "nghỉ phép năm bao nhiêu
+ngày" **không khớp một từ nào** bên đường lexical.
+
+Đường vector không dính lỗi này (nó embed `embed_input`, đã có đường dẫn tiêu đề), nên
+triệu chứng là "tìm kiếm hơi kém" chứ không phải "tìm kiếm hỏng" — đúng loại im lặng
+mà hybrid search sinh ra để tránh.
+
+Sửa bằng migration `0008`: sinh `tsv` từ `embed_input`. Chỉ tiến, không sửa `0004`.
+
+### Đã kiểm chứng bằng cách chạy, không bằng đọc
+
+Nạp một sổ tay thật rồi hỏi qua REPL:
+
+| Câu hỏi | Kết quả |
+|---|---|
+| "Hoàn tiền mất bao lâu?" | Trả lời đúng, **kèm trích dẫn** `(theo Sổ tay nhân viên 2026, mục Chính sách hoàn tiền)` |
+| "Công ty có hỗ trợ tiền gửi xe không?" | "Mình không tìm thấy thông tin… trong tài liệu nội bộ hiện có" — **không lấy kiến thức chung thay thế** |
+| `HT-2026` (mã văn bản) | Tìm đúng chunk. Đây là ca mà chỉ-vector hỏng, và là lý do BM25 tồn tại |
+
+**Xong khi:** trả lời có trích dẫn nguồn; dưới ngưỡng thì nói "không tìm thấy trong
+tài liệu". **Cả hai đã kiểm chứng.**
+
+**Còn lại:** benchmark rerank thật khi có tài liệu thật.
 
 ---
 
@@ -629,50 +711,135 @@ embedding thật. Chúng đi qua **bề mặt công khai của `MemoryPort`**, k
 cuối kiểm trên **chuỗi prompt đã build** chứ không trên kết quả repository — rò rỉ có thể xảy ra ở
 builder trong khi repository vẫn sạch.
 
-## 10. Giai đoạn 8 — Eval, monitoring, go-live
+## 10. Giai đoạn 8 — Eval, monitoring — **công cụ đã xong (07/09/2026)**
 
-### Eval
+### Eval — runner chạy thật, dataset còn thiếu
 
-`evals/dataset/qa.jsonl` — **50 câu viết tay** từ tài liệu thật: `{question, answer, expected_chunk_ids}`.
-Việc tốn thời gian nhất, không tự động hoá được.
+`evals/runner.py` không còn là chỗ trống. Với mỗi câu: tìm tài liệu → dựng prompt
+đúng như đường thật → gọi model → chấm. In bảng chỉ số và **trả về 1 khi trượt bất kỳ
+ngưỡng nào**, nên nối vào CI là xong.
 
-| Chỉ số | Ngưỡng |
+| Chỉ số | Ngưỡng | Đo bằng |
+|---|---|---|
+| Recall@5 | > 0,85 | `expected_chunk_ids` có nằm trong top 5 không |
+| Faithfulness | > 0,9 | LLM-as-judge, `evals/metrics/faithfulness.py` |
+| Latency p95 | < 5s | Toàn đường: tìm + dựng prompt + sinh |
+
+**Hai điều bắt buộc, học được khi chạy thử:**
+
+1. **Người chấm phải nhìn ĐÚNG thứ bot nhìn.** Bản đầu chỉ nối các `content` lại, tức
+   là bỏ mất tên tài liệu và tên mục. Câu trả lời có trích dẫn `(theo Sổ tay 2026, mục
+   Chính sách hoàn tiền)` bị coi là chi tiết không kiểm chứng được và **chấm đều 0,5
+   cho mọi câu** — sai ở phía người chấm chứ không phải ở bot, và vì nó đều nên trông
+   rất giống một phép đo thật. Giờ dùng chung `render_knowledge()` với đường thật.
+2. **Dataset mẫu phải làm eval ĐỎ, không phải xanh.** `qa.jsonl` hiện có đúng một dòng
+   ví dụ; runner nhận ra và thoát với mã 1. Một bộ eval chạy trên dữ liệu mẫu rồi báo
+   "đạt" còn tệ hơn không có eval: nó cho ta niềm tin mà không kiểm chứng gì.
+
+**Đã chạy thật** trên 6 câu hỏi viết tay từ một sổ tay thật đã nạp:
+
+```
+  DAT  Recall@5              1.000   (nguong 0.85)
+  DAT  Faithfulness          1.000   (nguong 0.9)
+  DAT  Latency p95 (ms)       3938   (nguong 5000)
+```
+
+p95 = 3,9s — **dưới mục tiêu 5s** trên đường có RAG, không tool. Con số 8,5s ở §2 là
+đường có tool và đo trên mẫu khác; xem §14.
+
+**Còn thiếu, và không tự động hoá được: 50 câu viết tay từ tài liệu thật của bạn.**
+Sinh câu hỏi bằng model rồi chấm bằng chính model là đo lường vòng tròn. Chạy:
+
+```bash
+uv run python -m evals.runner                    # bộ chính thức
+uv run python -m evals.runner duong/dan.jsonl    # bộ nhỏ, để kiểm chính runner
+```
+
+**Đã nối vào CI** — `.github/workflows/evals.yml`: chạy **nightly 02:00 giờ Việt Nam**,
+khi bấm tay, và khi PR đụng `agents/prompt/`, `knowledge/`, `llm/models.py`,
+`llm/reranker.py`, `evals/`. Không chạy mọi commit: mỗi lần chạy tốn tiền thật.
+
+Chỗ trước đây tôi ngần ngại — "dataset còn là dòng mẫu nên job sẽ đỏ mọi đêm" — đã giải
+quyết bằng **mã thoát**, không bằng cách hoãn:
+
+| Mã | Nghĩa | CI làm gì |
+|---|---|---|
+| 0 | Đạt hết ngưỡng | Xanh |
+| 1 | **Trượt** — có vấn đề thật | **Đỏ** |
+| 2 | Chưa có dữ liệu để chạy | Xanh, kèm `::warning` trên tab Summary |
+
+Gộp 2 vào 1 là biến một việc cố ý chưa làm thành một báo động đỏ hằng đêm, và một job
+đỏ thường trực là một job không ai đọc nữa.
+
+**Tài liệu thật không nằm trong repo.** Workflow nạp mọi tệp trong `evals/corpus/` trước
+khi chạy; thư mục đó cố ý trống và đã có trong `.gitignore`. Tài liệu nội bộ mà commit
+vào git thì nó đi theo mọi bản clone, mọi fork, và mọi lần lộ repo.
+
+### Monitoring — đã có
+
+| Thứ | Trạng thái |
 |---|---|
-| Recall@5 | > 0,85 |
-| Faithfulness (LLM-as-judge) | > 0,9 |
-| Answer relevance | > 0,85 |
-| Latency p95 | < 5s |
-| Cost/query | theo ngân sách |
+| `uv run python -m main.cli stats [ngày]` | **Xong.** Đọc thẳng `usage_log`: tiền theo route, token, tỉ lệ lỗi, latency trung bình + p95, tỉ lệ cache, tin/ngày |
+| `GET /api/metrics` | **Xong.** Định dạng phơi bày Prometheus, Grafana đọc thẳng. Chỉ localhost như mọi route khác |
+| `infra/metrics.py` | **Xong.** Chỉ đọc, không hàm nào ghi |
+| Grafana dashboard | **Xong.** `ops/grafana/dashboards/cp-assistant.json` — 6 panel: ngân sách, tỉ lệ cache, lỗi, p95 theo route, chi phí theo route, số lần gọi |
+| Prometheus | **Xong.** `ops/prometheus.yml`, scrape 30s |
+| Alert | Chưa |
 
-Chạy **nightly + khi PR đụng** `prompt/`, `knowledge/ingest/`, `llm/models.py` — không phải mọi commit,
-mỗi lần chạy tốn tiền thật.
+Bật cả stack theo dõi bằng một lệnh — `profiles` để `docker compose up` thường **không**
+kéo hai container này theo, vì một máy dev không cần chúng chỉ để nhìn đồ thị:
 
-### Monitoring
+```bash
+docker compose -f ops/docker-compose.yml --profile monitoring up -d
+# Grafana:    http://127.0.0.1:3001   (datasource + dashboard cắm sẵn, không phải bấm gì)
+# Prometheus: http://127.0.0.1:9090
+```
 
-Hiện **chỉ có `/api/health`**. `/metrics` và Grafana chưa tồn tại (`ops/grafana/` mới có `.gitkeep`).
+Cả hai chỉ bind `127.0.0.1` như `api`: số liệu vận hành nói ra chi phí, số tin và tỉ lệ
+lỗi — đó không phải thông tin công khai.
 
-Thứ tự đề nghị, rẻ trước: `usage_log` **đã có dữ liệu thật** nên một lệnh `cli stats` đọc thẳng từ đó
-dùng được ngay hôm nay và không cần dựng gì. `/metrics` + Grafana (tin/ngày, latency p95, cost/ngày,
-tỉ lệ lỗi) sau. Alert: webhook lỗi liên tiếp, token sắp hết hạn, chi phí vượt ngưỡng.
+Dashboard là **mã nguồn**, không phải thứ chỉnh trong giao diện rồi quên: `allowUiUpdates`
+để `false`, nên sửa trong Grafana thì phải export JSON và commit, nếu không lần dựng stack
+sau sẽ xoá sạch thay đổi đó.
 
-**LangSmith (D11):** bọc client bằng wrapper của LangSmith, đúng một chỗ trong `llm/openai_client.py`.
-`container.py` **chỉ bọc khi `NODE_ENV == 'development'`** — kể cả cờ bật ở production cũng không bọc.
-Lý do: trace gửi nguyên văn prompt, gồm tin nhắn nhóm và fact L3 về từng người có tên; `redact.py` chỉ
-che log chứ không che payload đi LangSmith. Thêm test khẳng định production không bao giờ bọc.
+Số đo thật lấy từ `cli stats` ngày 07/09/2026:
+
+```
+  route            goi  loi        in      out    cache       USD   tb ms  p95 ms
+  reply             55    2     43294    10360    61952    0.0331    3898    8750
+  embed           1194    0     21865        0        0    0.0028    1834   19952
+  Prompt caching: 37/53 luot (70%), trung binh 1674 token doc tu cache
+```
+
+Hai điều bảng này nói ra mà không nhìn thì không biết:
+
+- **Cache đang ăn 70%.** Tụt về 0 nghĩa là tiền tố ổn định của prompt đã vỡ. `cli stats`
+  in cảnh báo hẳn một dòng khi tỉ lệ đó bằng 0.
+- **`embed` p95 = 19,9s, sát trần timeout 20s.** 1194 lần gọi. Đây là đường chạy ở
+  **mỗi tin nhắn** (L3 tìm fact), nên nó đáng theo dõi — và là lý do cache embedding
+  câu hỏi có mặt ở Giai đoạn 6.
+
+**LangSmith (D11):** vẫn chưa làm. Khi làm, bọc đúng một chỗ trong `llm/openai_client.py`,
+và `container.py` **chỉ bọc khi `NODE_ENV == 'development'`** — kể cả cờ bật ở production
+cũng không bọc. Trace gửi nguyên văn prompt, gồm tin nhắn nhóm và fact L3 về từng người
+có tên; `redact.py` chỉ che log chứ không che payload đi LangSmith.
 
 ### Checklist go-live
 
-**Nền tảng:** dedup `message_id` mọi adapter · verify `X-Hub-Signature-256` · webhook trả 200 dưới 2s ·
-chunk tin dài · allowlist đang bật · quy trình khôi phục khi mất token.
+**Nền tảng:** dedup `message_id` mọi adapter ✔ · webhook Zalo (chưa — thiếu sơ đồ ký) ·
+chunk tin dài ✔ · allowlist đang bật ✔ · quy trình khôi phục khi mất token.
 
-**LLM & RAG:** system prompt cấm markdown · fallback khi API lỗi · ngưỡng rerank + biết nói "không tìm
-thấy" · bắt buộc trích dẫn · chunk bọc tag chống injection · chỉ admin nạp tài liệu.
+**LLM & RAG:** system prompt cấm markdown ✔ · fallback khi API lỗi ✔ · ngưỡng rerank +
+biết nói "không tìm thấy" ✔ · bắt buộc trích dẫn ✔ · chunk bọc tag chống injection ✔ ·
+chỉ admin nạp tài liệu ✔ (không có route HTTP nào nạp được).
 
-**Memory:** `thread_id` trong **mọi** truy vấn · fact revoke không vào prompt · lệnh `memory`/`quên` có
-test · mỗi tầng context có trần · công cụ audit toàn bộ fact của một thread.
+**Memory:** `thread_id` trong **mọi** truy vấn ✔ · fact revoke không vào prompt ✔ ·
+lệnh `memory`/`quên` có test ✔ · mỗi tầng context có trần ✔ · công cụ audit toàn bộ
+fact của một thread ✔ (`cli memory`).
 
-**Vận hành:** rate limit 3 tầng · cost alert ngày · eval 50 câu trong CI · secret trong secret manager ·
-monitoring và alert đã cấu hình.
+**Vận hành:** rate limit 3 tầng ✔ · cost alert ngày (chốt chặn ✔, alert chưa) ·
+eval 50 câu trong CI (runner ✔, dataset chưa) · secret trong secret manager ·
+monitoring ✔ / alert chưa.
 
 ---
 
@@ -683,12 +850,11 @@ Mọi biến khai trong `src/config/schema.py` (pydantic-settings). Thiếu mộ
 ```ini
 NODE_ENV  LOG_LEVEL
 OPENAI_API_KEY                      # bắt buộc
-EMBEDDING_PROVIDER/API_KEY/MODEL    # 'fake' cho tới GĐ 6
+EMBEDDING_PROVIDER/API_KEY/MODEL    # doc THAT tu day, khong con hardcode
 EMBEDDING_DIM=1024                  # PHẢI khớp cột VECTOR(n)
-RERANK_PROVIDER/API_KEY/MODEL  RERANK_MIN_SCORE=0.35
+RERANK_PROVIDER/API_KEY/MODEL  RERANK_MIN_SCORE=0.35   # khong phai 'cohere' -> ban khong can khoa
 DATABASE_URL  REDIS_URL
 ZALO_BOT_TOKEN  ZALO_MODE  ZALO_WEBHOOK_SECRET      # GĐ 4
-META_APP_SECRET  META_PAGE_TOKEN  META_VERIFY_TOKEN # GĐ 5
 BOT_MENTION_NAME  GROUP_POLICY  DM_POLICY
 RL_USER_PER_MIN=10  RL_THREAD_PER_MIN=30
 MEMORY_IMPLICIT_ENABLED=false       # L3 implicit — bot TU trich fact. Mac dinh TAT
@@ -700,6 +866,8 @@ REACT_MAX_ITERATIONS=5  REACT_MAX_TOOL_CALLS=8  REACT_DEADLINE_MS=60000
 
 Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ `docker-compose`.
 
+Ba biến `META_*` **đã bị xoá** ngày 07/09/2026 cùng với Messenger — xem §7.
+
 ---
 
 ## 12. Kiểm thử — bốn tầng
@@ -710,9 +878,14 @@ Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ
 | Contract | `tests/contract` — adapter ăn fixtures thật | mọi commit | Ghi payload thật một lần, dùng mãi |
 | Integration | `tests/integration` — Postgres + Redis + embedding thật | mọi PR | Máy bạn: bỏ qua có nêu lý do. **CI: ĐỎ** — xem dưới |
 | Security | `tests/security` — rò rỉ cross-thread | mọi PR | **Không được phép xoá**, và trên CI không được phép bỏ qua |
-| Eval | `evals/` — 50 câu | khi đổi prompt/chunking/model | Ngưỡng ở §10 |
+| Eval | `evals/` — 50 câu | khi đổi prompt/chunking/model | Ngưỡng ở §10. Runner đã chạy được |
 
-**290 test**, cả bốn tầng đều có file.
+**384 test** (07/09/2026), cả bốn tầng đều có file. Tăng từ 290 nhờ Giai đoạn 6 và các
+bản sửa ở §16.
+
+Cả bộ chạy trong **13,6 giây** — trước đó là 100 giây. Không phải nhờ bỏ bớt việc: 53
+test tích hợp và bảo mật vẫn chạy thật trên Postgres và embedding thật, 0 bỏ qua. Chúng
+nhanh lên vì thôi phải bắt tay TLS ở mỗi lần gọi (§16.8).
 
 ### Bỏ qua im lặng — lỗ hổng đã bịt (07/09/2026)
 
@@ -772,13 +945,18 @@ docker compose -f ops/docker-compose.yml up -d postgres redis
 uv run python -m main.cli migrate        # chạy 2 lần: lần 2 phải không làm gì
 uv run python -m main.api                # http://127.0.0.1:3000 — giao diện web
 uv run arq main.worker.WorkerSettings    # worker chạy pipeline
+uv run arq main.worker.MaintenanceWorkerSettings   # nén L2, trích fact
 uv run python -m main.zalo               # long-poll Zalo Bot
 uv run python -m main.cli                # REPL, không cần token nền tảng nào
+
+uv run python -m main.cli ingest tai-lieu/so-tay.md "Sổ tay 2026"   # nạp RAG, chỉ admin
+uv run python -m main.cli stats 7                                   # tiền đi đâu
 ```
 
 Giao diện do chính process `api` render (Jinja2), không có server dev riêng và không có bước build.
 
-Truy vấn kiểm tra sức khoẻ:
+Truy vấn kiểm tra sức khoẻ — **giờ đã có `cli stats` đọc sẵn những thứ này**, hai câu
+dưới giữ lại cho lúc cần cắt lát khác:
 
 ```sql
 -- Tiền đang đi đâu, và token reasoning tốn bao nhiêu
@@ -801,8 +979,9 @@ FROM usage_log WHERE ok;
 | **Injection qua kết quả web** | Cao khi bật GĐ 3 | 6 lớp ở §5.6, có case kiểm chứng riêng |
 | Vòng ReAct đốt tiền | Trung bình | 5 chặn cứng; `withinDailyBudget()` mỗi vòng |
 | Rò rỉ memory cross-group | Thấp | `ThreadScope` bắt buộc + 7 test bắt buộc + `guard:sql` |
-| Meta App Review từ chối | **Cao** | Nộp kèm screencast luồng thật; Business Verification từ sớm |
-| Latency vượt 5s | **Đang xảy ra** | p95 **8,5s** trên 32 lượt (§2). Lượt chậm nhất 12,5s **không** dùng tool — nó sinh 1.082 token đầu ra, nên nghi can là độ dài câu trả lời chứ không phải tool. Mẫu còn nhỏ; đo thêm rẻ hơn tối ưu mù |
+| ~~Meta App Review từ chối~~ | — | **Không còn.** Messenger đã bỏ khỏi phạm vi (§7), nên cả App Review lẫn Business Verification đều biến mất — đó là đường găng dài nhất của kế hoạch cũ |
+| Latency vượt 5s | **Một phần** | Đường **có RAG, không tool**: p95 **3,9s** — đạt (đo bằng `evals.runner`, 6 câu). Đường **có tool**: p95 **8,75s** trên 55 lượt (`cli stats`) — vẫn trượt. Nghi can là độ dài câu trả lời và số vòng ReAct, không phải bản thân việc tra cứu |
+| `embed` sát trần timeout | **Mới** | p95 **19,9s** / trần 20s trên 1194 lượt. Đường này chạy ở **mỗi tin nhắn** (L3 tìm fact). Cache `emb:` đã giảm cho đường RAG; L3 thì chưa dùng cache đó |
 | Chất lượng tiếng Việt của `gpt-5-mini` | Trung bình | Eval đo; đổi model là sửa `llm/models.py`, một file |
 | Group API Zalo đổi hành vi | Trung bình | Đảm bảo DM vẫn dùng được; fixtures bắt sớm |
 | Chạm trần `concurrency: 1` | Thấp | ~240 câu/giờ, mục tiêu 200–1000 câu/**ngày**. Chạm thì tự khoá phân tán per-thread bằng Redis |
@@ -812,10 +991,364 @@ FROM usage_log WHERE ok;
 ## 15. Quyết định còn mở
 
 1. **`DAILY_BUDGET_USD`** chính thức — đang để 2. Ở $0,00073/câu thì 2 USD ≈ 2.700 câu/ngày.
-2. **Rerank** — embedding đã chốt (`text-embedding-3-large`, `dimensions=1024`, xem §9). Còn lại đúng
-   nhà cung cấp rerank: OpenAI **không có** rerank nên phải là nhà thứ hai (Cohere / Jina / Voyage).
-   §8 yêu cầu benchmark trên tài liệu thật trước khi viết code, nhưng chưa có tài liệu — **vòng lặp
-   chặn**. Cắt bằng cách chọn một mặc định để viết được, benchmark khi tài liệu về; đổi nhà cung cấp
-   là sửa một file.
-3. **Thư viện đọc pdf/docx** — đề xuất `pypdf` + `python-docx` (đề xuất cũ `unpdf` + `mammoth` là thư
-   viện Node, không dùng được nữa).
+2. **Rerank** — vòng lặp chặn đã cắt xong, và **công cụ đo đã có**: `ops/benchmark_rerank.py` chạy
+   đúng đường ống thật (vector ∥ BM25 → RRF → rerank) trên một tệp câu hỏi, rồi **đề xuất luôn ngưỡng**
+   từ khoảng an toàn đo được. Chạy một lệnh khi có tài liệu thật:
+
+   ```bash
+   uv run python ops/benchmark_rerank.py evals/dataset/qa.jsonl
+   ```
+
+   Đo thử 07/09/2026 với bản **không khoá** trên một sổ tay thật: top-1 đúng 6/6, chunk đúng đạt
+   0,750–0,889, chunk sai đạt tới **0,500**. Tức là `RERANK_MIN_SCORE = 0,35` **cho lọt chunk sai vào
+   prompt**. `.env.example` đã đổi sang **0,55**; chốt nhà cung cấp thật thì chạy lại lệnh trên — hai
+   cross-encoder khác nhau cho hai thang điểm khác nhau, bê ngưỡng từ nhà này sang nhà kia là đoán mò.
+3. ~~**Thư viện đọc pdf/docx**~~ — đã chốt và đã cài: `pypdf` + `python-docx` (§8).
+4. **50 câu hỏi eval** — việc tốn thời gian nhất còn lại, và không ai làm thay được: phải viết tay từ
+   tài liệu thật của bạn. Runner đã sẵn sàng và sẽ đỏ cho tới khi có chúng (§10).
+5. ~~**`TAVILY_API_KEY`**~~ — đã có khoá, `web_search` đã chạy thật (§5.10).
+
+---
+
+## 16. Mười chỗ hỏng im lặng — đã sửa (07/09/2026)
+
+Bảy chỗ đầu tìm ra bằng cách **đọc lại toàn bộ code và đối chiếu với tài liệu**. Ba chỗ
+sau (16.8–16.10) tìm ra bằng cách **nhìn số đo và chụp màn hình** — chúng không lộ ra
+khi đọc code, chỉ lộ khi chạy và đo.
+
+Điểm chung của cả mười: chúng chạy xanh, không log gì, và mỗi cái vô hiệu hoá một lớp
+bảo vệ hoặc một cải tiến mà tài liệu tuyên bố là đang có.
+
+> **Ba thứ đã bắt được lỗi ở đây, ghi lại vì chúng rẻ hơn việc đọc code:**
+> `cli stats` (16.8 — một con số đứng sát trần timeout), một ảnh chụp màn hình
+> (§17 — dải trống 150px và nhãn hội thoại sai), và một container Prometheus thật
+> (16.9 — 403 mà không log gì).
+
+### 16.1 `max_tries = 3` chưa bao giờ thử lại lần nào
+
+Lỗi 5xx → `mark_replied()` → `raise` để hàng đợi retry → lần retry vào lại `handle_reply`,
+gặp `has_replied()` và **thoát ngay**. Ba lần thử biến thành một.
+
+Gốc rễ: **một khoá Redis gánh hai ý nghĩa** — "đã gửi văn bản cho người dùng" và "job
+này coi như xong". Hai cái đó không trùng nhau khi lỗi còn có thể thử lại.
+
+Sửa: `Failed` mang thêm `replied: bool`; worker chỉ đặt cờ khi pipeline **thật sự đã
+gửi gì đó**. Và `Deps.is_final_attempt` (worker truyền `ctx["job_try"]` của ARQ vào)
+để pipeline **không gửi câu fallback khi còn lượt retry** — gửi rồi mà lần sau thành
+công thì người dùng nhận hai tin cho một câu hỏi.
+
+Lỗi không retry được (401/403, timeout) vẫn trả lời **ngay**, kể cả khi còn lượt: thử
+lại một cấu hình sai ba lần vẫn sai ba lần, chỉ tổ bắt người dùng chờ.
+
+### 16.2 Chốt chặn ngân sách fail-OPEN, ngược hẳn với tài liệu
+
+`within_daily_budget()` chỉ bắt `ValueError`. Redis mất kết nối thì `ConnectionError`
+bay xuyên qua stage 5, không ai bắt → job đỏ → **bot im lặng**. Ba chỗ trong tài liệu
+khẳng định hàm này "tự fail-closed".
+
+Sửa: bắt mọi lỗi hạ tầng và trả `False`. Đây là chỗ **khác hẳn** `check()` ở ngay trên
+nó: rate limit hỏng thì cho qua (lớp chống lạm dụng), còn không đọc được số đã tiêu mà
+vẫn gọi model là biến một sự cố Redis thành một hoá đơn không có trần.
+
+Cùng file: `add_cost()` làm `INCRBYFLOAT` rồi `EXPIRE` — hai vòng mạng, đúng cái mà
+docstring của `_BUCKET_SCRIPT` ngay phía trên phê phán. Gộp thành một `pipeline()`.
+
+### 16.3 `nhớ giúp:` đi vòng qua mọi chốt chặn tiền
+
+Stage 3 chạy trước rate limit và budget guard. Điều đó **đúng** cho `memory` / `quên` /
+`quên hết` / `đồng ý` — người dùng phải xoá được dữ liệu của mình kể cả khi bị chặn.
+Nhưng `nhớ giúp:` cũng nằm trong nhóm đó, mà đường ghi fact gọi **embedding thật** ở mỗi
+lần. Gõ liên tục là tiêu tiền ngoài cả rate limit lẫn ngân sách ngày.
+
+Sửa: `handle_command` trả về `DeferredWrite` cho lệnh ghi; `handle_message` giữ lại,
+chạy xong stage 4 và 5 rồi mới thực hiện. Đọc và xoá vẫn chạy sớm như cũ.
+
+### 16.4 `EMBEDDING_MODEL` trong `.env` không có tác dụng gì
+
+`llm/embedder.py` hardcode `text-embedding-3-large` và `1024`, trong khi `config/schema.py`
+vẫn **bắt buộc** khai cả hai biến. Đổi model trong `.env` → không đổi gì, im lặng — đúng
+loại lệch mà L7 sinh ra để tránh.
+
+Sửa: đọc thật từ settings. Kèm bảng giá `EMBEDDING_PRICES` trong `llm/models.py`, và
+model không có trong bảng thì **không cho khởi động**: chạy tiếp nghĩa là `usage_log`
+ghi tiền theo giá của một model khác, và chốt chặn ngân sách đếm theo con số sai.
+
+### 16.5 Fact `thread:*` ghi được nhưng không đường nào đọc ra
+
+`search_facts` chỉ tìm `user:<sender_id>`. Fact chung của nhóm — thứ mà
+`ARCHITECTURE.md` §6.2 dành hẳn một dòng quyền hạn cho — **không bao giờ vào prompt**.
+
+Sửa: `message_repo.facts()` tìm cả hai subject trong **một truy vấn** (`subject_id = ANY`),
+tức là vẫn **một lần embed**. Gọi port hai lần sẽ nhân đôi một khoản chi thường trực,
+đúng khoản vừa được đưa vào chốt chặn ở 16.4.
+
+### 16.6 Câu trả lời của bot trong nhóm được ghi là `is_group = false`
+
+`persist_outbound` đặt cứng `False`. Cột đó mô tả **cuộc hội thoại**, không mô tả người
+gửi, nên một thread nhóm có một nửa số dòng khai sai. Sửa: truyền `msg.is_group` xuống.
+
+### 16.7 Chi phí nén kết quả công cụ trộn vào chi phí nén L2
+
+`_compress_if_too_long` ghi `usage_log` với `route="summarize"`. Câu hỏi "việc nén hội
+thoại L2 tốn bao nhiêu" không còn trả lời được. Sửa: thêm route `compress` riêng.
+
+### 16.8 Mỗi lời gọi HTTP dựng lại một pool kết nối mới
+
+Tìm ra bằng cách nhìn bảng `cli stats`: route `embed` có p95 **19.969ms** — sát đúng
+trần timeout 20s. Một con số đứng ngay cạnh trần không phải là "hơi chậm", nó là dấu
+vết của thứ đang **chạm** trần.
+
+Đào vào `usage_log`: p50 328ms, p90 1202ms — bình thường. Nhưng **96 trên 1493 lần
+(6,4%) vượt 19s**, và lần chậm nhất là **41 giây cho một input 8 token**. Một câu 8
+token không thể mất 41 giây ở phía OpenAI. 41s ≈ 20s + 20s: một lần bắt tay treo đến
+hết timeout, rồi `max_retries` thử lại.
+
+Nguyên nhân: `llm/embedder.py` gọi `AsyncOpenAI(...)` **ngay trong thân hàm `embed()`**,
+nên mỗi lần embed lại dựng một pool kết nối mới và bắt tay TLS lại từ đầu.
+`llm/openai_client.py` giữ client ở biến module từ đầu; chỗ này bị bỏ sót.
+
+Đo trực tiếp, 30 lần gọi liên tiếp cùng một API:
+
+| | p50 | p90 | max | tổng |
+|---|---|---|---|---|
+| Client mới mỗi lần (bản cũ) | 282ms | 1062ms | **20.016ms** | 33,5s |
+| Client dùng chung (bản mới) | 188ms | **360ms** | **578ms** | **6,8s** |
+
+`max = 20.016ms` chính là trần timeout, và nó **biến mất hoàn toàn** sau khi sửa.
+
+**Đây là một lớp lỗi, không phải một chỗ.** Grep ra sáu nơi cùng kiểu: `web_search`,
+`paper_search`, `reranker`, và ba lời gọi Zalo (`getMe`, `getUpdates`, `sendMessage`).
+Tất cả đều nằm trên đường phản hồi. Gộp về một pool dùng chung trong `infra/http.py` —
+đúng luật L6 (mọi lời gọi ra ngoài đi qua `infra/` hoặc `llm/`), và timeout truyền
+theo **từng lần gọi** vì một vòng long-poll 25 giây không thể áp timeout của nó lên
+mọi lời gọi khác.
+
+**Hệ quả đo được ngoài dự tính: bộ test từ 100s xuống 13,6s.** 53 test tích hợp và
+bảo mật chạy thật trên embedding thật — chúng không nhanh lên vì làm ít việc đi, mà
+vì thôi phải bắt tay TLS ở mỗi lần gọi.
+
+Kèm theo: `close_http()` gọi khi tắt `api`, `zalo`, `cli` và ở `conftest.py`. Bỏ sót
+chỗ này thì httpx cảnh báo "unclosed client" và bỏ ngỏ kết nối.
+
+**Một test phải sửa theo, và đó là điều đúng.** `tests/unit/test_zalo_api.py` vá thẳng
+`httpx.AsyncClient`. Chỗ nối đó không còn, nên ba test hoá đỏ ngay — đúng như mong đợi:
+vá ở chỗ cũ mà vẫn xanh nghĩa là test đang kiểm một đường mà code thật không đi.
+
+### 16.9 `/api/metrics` chặn chính Prometheus
+
+Route `/api/metrics` vừa viết dùng `require_localhost`, nhưng Prometheus chạy trong
+**một container khác** và gọi tới `api:3000` qua mạng của compose — địa chỉ đến là
+172.x, không phải loopback. Kết quả: **403**, dashboard Grafana trống rỗng, và không
+có dòng log nào ở phía Grafana nói vì sao. Gọi tay từ chính máy thì lại ra 200, nên
+triệu chứng không hề chỉ về nguyên nhân.
+
+Đã kiểm chứng bằng cách gọi từ một IP khác `127.0.0.1` (403), sửa, rồi gọi lại (200),
+và chạy hẳn một container Prometheus thật scrape qua `host.docker.internal`:
+`health = up`, thu được đủ `cp_budget_spent_usd`, `cp_prompt_cache_hit_ratio`,
+`cp_llm_latency_p95_ms` theo từng route.
+
+Cách sửa là `require_operator`: chấp nhận loopback **và** địa chỉ không định tuyến
+được từ internet. Dùng `is_global` chứ **không** `is_private` — `is_private` của Python
+còn báo True cho cả các dải tài liệu (203.0.113.0/24, 2001:db8::/32), nên nó nói một
+đằng và làm một nẻo. `tests/unit/test_web_access.py` chốt cả hai chính sách và ranh
+giới giữa chúng; chính bộ test đó bắt được lỗi `is_private` khi tôi viết nó lần đầu.
+
+Các route khác **giữ nguyên** loopback-only: chúng đọc và **xoá** được hội thoại, còn
+`/metrics` chỉ trả số liệu tổng hợp, không có nội dung tin nhắn nào.
+
+### 16.10 Workflow eval tự mâu thuẫn
+
+Bước "Kiểm tra khoá" cho `exit 1` khi thiếu `OPENAI_API_KEY` — tức là job nightly **đỏ
+mọi đêm** với bất kỳ repo nào chưa thêm secret. Đúng cái mà bước "Chạy eval" ngay dưới
+nó đã cẩn thận tránh bằng mã thoát 2. Hai chỗ trong cùng một tệp theo hai luật ngược
+nhau thì luật đó chỉ là một câu nói. Giờ thiếu khoá là **bỏ qua kèm cảnh báo**, và các
+bước sau có `if` để không chạy vô ích.
+
+### Ngoài ra, một chỗ lãng phí và một chỗ nói sai
+
+- `build_deps()` chạy `assert_embedding_dim()` (2 truy vấn `pg_attribute`) ở **mỗi tin
+  nhắn**. Số chiều cột là thuộc tính của schema, nó không đổi giữa hai tin. Giờ chạy
+  một lần mỗi process.
+- `REACT_DEADLINE_MS` chỉ có một giá trị 60s dùng chung, trong khi tài liệu ghi
+  "60s web / 15s nhóm chat". Giờ có bảng theo nền tảng: web và CLI 60s, Zalo 20s.
+
+---
+
+## 17. Thiết kế lại giao diện web (07/09/2026)
+
+Bản cũ chạy đúng nhưng trông như một bản dựng thử: một ô nhập một dòng, bong bóng
+không có giờ, danh sách hội thoại không nói được cuộc nào là cuộc nào. Vẫn không có
+bước build, không có Node — chỉ ba tệp: `index.html`, `styles.css`, `app.js`.
+
+### Hệ thống thị giác, không phải một mớ giá trị rời
+
+Toàn bộ màu, khoảng cách, bo tròn và đổ bóng khai trong `:root` và **mọi** quy tắc phía
+dưới dùng lại chúng. Không có số gõ tay giữa chừng file — đó là cách một giao diện tự
+trôi thành không đồng đều sau vài lần sửa.
+
+- **Thang khoảng cách 4px** (`--s1`…`--s10`), thang bo tròn, ba mức đổ bóng rất nhẹ.
+- **Một màu nhấn duy nhất.** Hai màu nhấn nghĩa là không màu nào còn là điểm nhấn.
+- **Nền sáng/tối đầy đủ**, có nút đổi và nhớ lựa chọn. Việc đọc lựa chọn đó nằm **trong
+  `<head>` và chạy đồng bộ**: để xuống dưới thì trang kịp vẽ khung sáng rồi mới đổi sang
+  tối — một nháy trắng vào mắt người dùng ở mỗi lần tải.
+
+### Những thứ thêm vào vì chúng thay đổi cách dùng thật
+
+| Thứ | Vì sao |
+|---|---|
+| `textarea` tự giãn thay cho `input` một dòng | Câu hỏi cho trợ lý thường dài hơn một dòng; ô một dòng bắt người ta gõ mù phần đã trôi ra ngoài |
+| `Enter` gửi, `Shift+Enter` xuống dòng, `Ctrl/Cmd+K` hội thoại mới, `Esc` dừng | Quy ước đã có sẵn trong đầu người dùng; làm ngược lại là bắt họ học lại |
+| **Trạng thái rỗng có 4 gợi ý bấm được** | Một ô nhập trống không nói được bot làm được gì. Bốn thẻ này là bản mô tả năng lực, viết dưới dạng bấm được |
+| **Dấu vết ReAct gấp/mở được**, kèm thời gian từng công cụ | Đây là thứ phân biệt ứng dụng này với một ô chat thường. Xong việc thì tự gấp lại — nó là ghi chú bên lề, không phải nội dung chính |
+| **Chấm trạng thái SSE** ở chân sidebar | Thứ duy nhất nói cho người dùng biết trang còn nghe được câu trả lời hay không. Mất SSE mà không báo thì bot trông như đã chết |
+| Nút **chép câu trả lời**, giờ gửi trên mỗi tin | Câu trả lời có trích dẫn thường được dán sang chỗ khác |
+| **Không tự cuộn khi người dùng đã cuộn lên** | Kéo màn hình về cuối trong lúc người ta đang đọc lại là cách nhanh nhất làm họ bực |
+| **`#t=<thread_id>` trong URL** | Hội thoại lưu dấu trang được, gửi link được, nút Back chạy đúng. Không có nó thì tải lại trang là mất chỗ đang đọc |
+| Sidebar thành **lớp phủ** dưới 900px | Một cột 276px trên màn hình 390px không còn là điều hướng, nó là vật cản |
+
+### Ba lỗi thật, tìm được bằng cách CHỤP MÀN HÌNH chứ không bằng đọc code
+
+1. **Dải trống 150px ở đầu trang.** Bảng mặc định của trình duyệt có
+   `[hidden] { display: none }`, nhưng **bảng của tác giả thắng bảng mặc định** — nên
+   `.thinking { display: flex }` vẫn vẽ ra kể cả khi thẻ `hidden` đang bật. Sprite icon
+   ở đầu `<body>` cũng vậy, và một `<svg>` không khai kích thước mặc định là 300×150.
+   Sửa bằng một dòng `[hidden] { display: none !important; }`. Hai nạn nhân còn lại là
+   khối "đang soạn" và băng báo lỗi: cả hai **hiện thường trực**.
+
+2. **Nhãn hội thoại lấy nhầm câu.** `/api/threads` trả tin **cuối**, mà tin cuối gần như
+   luôn là câu trả lời của bot — nên thanh tiêu đề hiện nguyên một đoạn ba dòng, và mọi
+   hàng trong sidebar bắt đầu giống hệt nhau. Người dùng nhớ **họ đã hỏi gì**, không nhớ
+   bot đã đáp gì. Đã thêm `first_question` vào truy vấn và dùng nó làm nhãn.
+
+3. Ảnh chụp phải dùng `--headless=old`. Chế độ headless mới dừng đồng hồ ảo khi còn
+   request mạng đang treo, mà **SSE là một request treo vĩnh viễn** — nên nó không bao
+   giờ chụp. Ghi lại để lần sau không mất một tiếng.
+
+### Vẫn giữ nguyên
+
+`textContent` chứ không `innerHTML`, ở mọi chỗ. Câu trả lời của bot chứa nội dung từ web
+và từ tài liệu do người lạ soạn — đó là văn bản không tin cậy. Hàm `linkify` là chỗ **duy
+nhất** dựng cấu trúc DOM phức tạp hơn một node văn bản, và nó vẫn đi qua `createElement`.
+
+---
+
+## 18. Vòng hỏi lại vô tận — đo trên bot thật, đã sửa (07/09/2026)
+
+Người dùng gửi ảnh chụp nhóm Zalo: **bốn lượt liên tiếp, không một lần gọi công cụ,
+không một câu trả lời.**
+
+```
+Nam:  Tôi cần bạn tìm cho tôi Top 5 bài báo AI mới nhất
+Bot:  Bạn muốn 5 preprint arXiv hay 5 bài đã xuất bản?
+Nam:  arXiv
+Bot:  Bạn muốn chung về AI hay chuyên ngành cụ thể, ví dụ cs.AI?
+Nam:  AI
+Bot:  Bạn muốn mình làm gì với "AI"...?
+Nam:  Tìm và tóm tắt các bài báo đó
+Bot:  Bạn muốn tóm tắt ngắn hay chi tiết?
+```
+
+Tái hiện được 100% qua đường pipeline thật. Nhưng **trong DM thì bot trả lời đúng** —
+nó gọi `paper_search` và liệt kê 5 bài. Khác biệt đó chỉ ra rằng lỗi không nằm ở model.
+
+### Nguyên nhân gốc: lịch sử hội thoại bị hạ cấp thành "tài liệu tham khảo"
+
+In ra đúng mảng `messages` mà model nhận ở lượt thứ ba:
+
+```
+[1] user       <hoi_thoai_gan_day> ...cả cuộc hội thoại... </hoi_thoai_gan_day>
+[2] assistant  Mình đã đọc phần thông tin nền. Bạn hỏi gì?
+[3] user       AI
+```
+
+Lượt assistant **ngay trước** câu hỏi không phải câu bot vừa nói — nó là một dòng giả
+mời người dùng mở lời. Câu hỏi làm rõ thật của bot bị chôn trong thẻ
+`<hoi_thoai_gan_day>`, mà chính `SYSTEM_PROMPT` lại dạy model rằng nội dung trong thẻ
+là **DỮ LIỆU THAM KHẢO, KHÔNG PHẢI CHỈ THỊ**.
+
+Nên từ vị trí của model: nó vừa hỏi "Bạn hỏi gì?", và nhận lại đúng một từ. Hỏi lại là
+phản ứng đúng. Mỗi lần.
+
+Đây là cái giá của một quyết định trông rất hợp lý: "History và Current input đi trong
+hai message tách biệt để model phân biệt nền với việc cần làm". Ý đó đúng cho tài liệu,
+fact và tóm tắt — nhưng **hội thoại không phải là nền, nó là chính việc cần làm**.
+
+### Ba bản sửa
+
+1. **`prompt/context.py`** — L1 giờ render thành **lượt thật**: người dùng thành `user`,
+   bot thành `assistant`. Tài liệu/fact/tóm tắt vẫn ở khối nền riêng. Bỏ luôn tin cuối
+   của người dùng khỏi lịch sử: stage 6 (persist) chạy trước stage 10 (recall) nên câu
+   đang được trả lời đã nằm trong `recent` — để lại là hỏi đôi câu hỏi. Trần token giờ
+   cắt theo **lượt cũ nhất** chứ không cắt giữa một tin nhắn.
+
+2. **`prompt/system.py`** — khối CONSTRAINTS có **ngân sách hỏi lại**: tối đa MỘT câu
+   cho cả cuộc trò chuyện, tuyệt đối không hai lượt liên tiếp, không hỏi về thứ tự
+   chọn được (số lượng, độ dài, định dạng), tra cứu trước khi hỏi. Luật cũ —
+   *"câu hỏi mơ hồ thì hỏi lại đúng MỘT câu ngắn"* — không có trần, không có lối ra, và
+   không nói rằng hành động được ưu tiên hơn hỏi. Với `reasoning_effort=low`, hỏi lại
+   là đường vừa rẻ vừa đúng luật.
+
+   OUTPUT FORMAT viết lại chi tiết theo từng loại câu trả lời: cách đánh số khi liệt kê,
+   dạng trích dẫn nguồn tài liệu, dạng trình bày kết quả tra cứu và bài báo, và một luật
+   mới — **không kể chuyện hậu trường**: không nêu tên công cụ đã gọi, không giải thích
+   tra cứu bằng cách nào, không nói nguồn nào hỏng. Luật đó thêm sau khi thấy bot viết
+   *"công cụ không trả trực tiếp được kết quả arXiv nên mình dùng nguồn hợp nhất
+   OpenAlex/Crossref"* — đúng nội dung, sai người nghe.
+
+   Thêm hai few-shot: chọn mặc định thay vì hỏi ngược, và đã hỏi một lần rồi thì lượt
+   sau phải trả lời. `SYSTEM_PROMPT` 1535 → **2416 token** (trần 2600).
+
+3. **`main/container.py`** — deadline ReAct của Zalo **20s → 45s**. Con số 20s lấy theo
+   "15s Zalo" trong kế hoạch, mà dòng đó viết **trước khi có công cụ nào**. Đo thật:
+   một lượt có tra cứu cần gọi model chọn công cụ (~3s) + chạy công cụ (3–10s) + gọi
+   model viết trả lời (~8s), và log cho thấy có lượt cần **4 vòng, 3 lần gọi công cụ,
+   ~32 giây**. Hỏng ở 20s có nghĩa: người dùng chờ 20 giây để nhận "mình đang bị chậm",
+   toàn bộ kết quả tra cứu bị vứt, và **lượt sau mất ngữ cảnh nên bot hỏi lại lung tung**.
+   Không lời gọi model nào vượt 10s (26 mẫu, p50 3,2s) — trần sai nằm ở tổng vòng.
+
+### Kiểm chứng
+
+Chạy lại đúng bốn lượt đã hỏng, qua pipeline thật, model thật: **không còn vòng hỏi
+lại**. Bot chọn mặc định, gọi công cụ, liệt kê 5 bài đánh số kèm năm và DOI, và ở lượt
+cuối nó tóm tắt đúng danh sách nó vừa đưa ra.
+
+`tests/unit/test_conversation_turns.py` (17 test) khoá phần **cấu trúc** — phần duy
+nhất kiểm được một cách xác định: lượt ngay trước câu hỏi phải là câu bot vừa nói,
+không còn dòng giả "Bạn hỏi gì?", lịch sử không bị bọc trong thẻ dữ liệu, tin cuối của
+người dùng không lặp lại, và nền vẫn là nền.
+
+**Điều còn lại, nói thẳng:** phần *hành vi* vẫn có phương sai — đây là một hệ thống xác
+suất, không phải một hàm. Qua nhiều lần chạy, đa số lượt trả lời thẳng, thỉnh thoảng
+vẫn có một câu hỏi làm rõ. Cái đã biến mất là **vòng lặp**: không còn chuỗi bốn lượt
+hỏi liên tiếp, vì lỗi cấu trúc gây ra nó đã hết. Đo đúng chỉ số này cần bộ eval ở §10,
+và bộ đó cần 50 câu hỏi viết tay.
+
+### 18b. Hai phép đo đi kèm
+
+**`reasoning_effort=medium` đã thử, và tệ hơn.** Cùng đoạn hội thoại bốn lượt, hai lần
+mỗi mức:
+
+| | Câu hỏi làm rõ | Timeout (hết deadline ReAct) |
+|---|---|---|
+| `low` (8 lượt) | 1 | **0** |
+| `medium` (8 lượt) | 0 | **5** |
+
+`medium` đổi một câu hỏi làm rõ hiếm gặp lấy việc **hỏng hẳn quá nửa số lượt**: suy
+luận sâu hơn làm mỗi lần gọi lâu hơn, và một lượt có tra cứu vượt deadline 45s. Với
+một bot chat có công cụ, `low` là điểm vận hành đúng — muốn giảm số câu hỏi làm rõ thì
+sửa **prompt**, không phải tăng effort. Ghi vào `llm/models.py` để sau này không ai
+thử lại.
+
+**`paper_search` không còn chờ nguồn chậm nhất.** `asyncio.gather` đợi cả bốn nguồn,
+nên độ trễ của cả lần tìm bằng độ trễ của nguồn **chậm nhất**: log cho thấy nguồn khoẻ
+trả về sau 2,4–3,2s nhưng cả lần gọi mất đúng 10.016ms — một nguồn treo đến hết trần,
+ba nguồn kia ngồi chờ.
+
+Thay bằng một hạn **mềm** 6s: hết 6 giây mà đã có ít nhất một nguồn trả về thì lấy
+luôn, huỷ phần còn lại và ghi log nguồn nào bị bỏ. Chưa có gì thì vẫn chờ tiếp đến trần
+cứng — thiếu một bài báo còn hơn không có bài nào. Đo lại trên 5 truy vấn thật:
+**p50 2.672ms, max 6.250ms** (đúng hạn mềm), sàn 10s biến mất. `tests/unit/test_paper_fanout.py`
+(8 test) khoá cả bốn nhánh: có kết quả thì không chờ, chưa có gì thì chờ tiếp, nguồn
+lỗi không tính là đã có kết quả, và thứ tự trả về không được lệch — lệch là báo sai tên
+nguồn trong log.
+

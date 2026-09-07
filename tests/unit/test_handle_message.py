@@ -213,3 +213,55 @@ class TestTyping:
 
         assert result == Handled(replied=True)
         assert len(deps.channel.sent) == 1  # type: ignore[attr-defined]
+
+
+class TestRetryVaCoDaTraLoi:
+    """Cau fallback va co "da tra loi" phai khop nhau, neu khong retry thanh vo nghia.
+
+    Ban truoc: moi that bai deu dat co `replied:`, nen lan retry vao worker gap co do
+    va thoat ngay. `max_tries = 3` chua bao gio thu lai lan nao.
+    """
+
+    async def test_con_luot_retry_thi_KHONG_gui_gi(self) -> None:
+        deps = make_deps(llm=FakeLlm(error=Exception("500 upstream")), is_final_attempt=False)
+
+        result = await handle_message(make_msg(), deps)
+
+        assert isinstance(result, Failed)
+        assert is_retryable(result.error)
+        # Chua gui gi -> worker khong dat co -> lan retry con chay lai duoc.
+        assert result.replied is False
+        assert deps.channel.sent == []  # type: ignore[attr-defined]
+
+    async def test_lan_thu_cuoi_thi_gui_fallback(self) -> None:
+        deps = make_deps(llm=FakeLlm(error=Exception("500 upstream")), is_final_attempt=True)
+
+        result = await handle_message(make_msg(), deps)
+
+        assert isinstance(result, Failed)
+        assert result.replied is True
+        assert deps.channel.sent == [FALLBACK_TEXT]  # type: ignore[attr-defined]
+
+    async def test_loi_KHONG_retry_duoc_thi_tra_loi_ngay_du_con_luot(self) -> None:
+        """Khoa API sai: thu lai ba lan van sai ba lan. Bat nguoi dung cho la vo ich."""
+
+        class KhoaSaiError(Exception):
+            status_code = 401
+
+        deps = make_deps(llm=FakeLlm(error=KhoaSaiError("unauthorized")), is_final_attempt=False)
+
+        result = await handle_message(make_msg(), deps)
+
+        assert isinstance(result, Failed)
+        assert not is_retryable(result.error)
+        assert result.replied is True
+        assert deps.channel.sent == [CONFIG_ERROR_TEXT]  # type: ignore[attr-defined]
+
+    async def test_timeout_khong_retry_nen_van_tra_loi_ngay(self) -> None:
+        deps = make_deps(llm=FakeLlm(error=Exception("connection timeout")), is_final_attempt=False)
+
+        result = await handle_message(make_msg(), deps)
+
+        assert isinstance(result, Failed)
+        assert isinstance(result.error, UpstreamTimeout)
+        assert deps.channel.sent == [FALLBACK_TEXT]  # type: ignore[attr-defined]

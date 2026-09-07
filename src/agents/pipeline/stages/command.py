@@ -61,6 +61,21 @@ class Answer:
 
 
 @dataclass(frozen=True, slots=True)
+class DeferredWrite:
+    """Lenh GHI. Phai qua ratelimit va budget guard TRUOC khi thuc hien.
+
+    Doc (`memory`) va xoa (`quen`, `quen het`, `dong y`) chay som co chu dich:
+    nguoi dung phai dung toi duoc du lieu cua chinh minh ke ca khi dang bi chan.
+
+    `nho giup:` thi khac han — no GHI, va duong ghi fact goi embedding that o moi
+    lan. De chung o stage 3 nghia la mot nguoi go `nho giup:` lien tuc se tieu tien
+    ma khong qua mot chot chan nao: khong rate limit, khong ngan sach ngay.
+    """
+
+    command: Remember
+
+
+@dataclass(frozen=True, slots=True)
 class AskConfirm:
     """Liet ke ung vien va cho xac nhan. Cho goi tu luu `facts` lai de cho xac nhan."""
 
@@ -68,7 +83,31 @@ class AskConfirm:
     facts: tuple[Fact, ...]
 
 
-CommandOutcome: TypeAlias = NotACommand | Answer | AskConfirm
+CommandOutcome: TypeAlias = NotACommand | Answer | AskConfirm | DeferredWrite
+
+
+async def run_deferred_write(
+    deferred: DeferredWrite, memory: MemoryPort, scope: ThreadScope, sender_id: str
+) -> str:
+    """Thuc hien lenh ghi. Cho goi PHAI da chay xong stage 4 (ratelimit) va 5 (budget).
+
+    Tach ra khoi handle_command chu khong them mot tham so co/khong: mot tham so
+    boolean se bi truyen nham dung mot lan, va lan do khong ai nhan ra.
+    """
+    await memory.remember(
+        scope,
+        NewFact(
+            # subject_id suy ra tu sender_id cua TIN NHAN, khong tu van ban.
+            subject_id=user_subject(sender_id),
+            content=deferred.command.content,
+            # Nguoi dung noi thang ra: explicit, do tin cay tuyet doi. Fact do model
+            # tu trich di duong khac va phai kem confidence that.
+            source="explicit",
+            confidence=1.0,
+            created_by=sender_id,
+        ),
+    )
+    return f"Được, mình nhớ rồi: {deferred.command.content}"
 
 
 def render_facts(facts: list[Fact]) -> str:
@@ -99,19 +138,8 @@ async def handle_command(
     subject = user_subject(sender_id)
 
     if isinstance(command, Remember):
-        await memory.remember(
-            scope,
-            NewFact(
-                subject_id=subject,
-                content=command.content,
-                # Nguoi dung noi thang ra: explicit, do tin cay tuyet doi. Fact do
-                # model tu trich di duong khac va phai kem confidence that.
-                source="explicit",
-                confidence=1.0,
-                created_by=sender_id,
-            ),
-        )
-        return Answer(text=f"Được, mình nhớ rồi: {command.content}")
+        # KHONG ghi tai day. Xem DeferredWrite: duong ghi phai di qua stage 4 va 5.
+        return DeferredWrite(command=command)
 
     if isinstance(command, ShowMemory):
         facts = await memory.list_facts(scope, subject)
