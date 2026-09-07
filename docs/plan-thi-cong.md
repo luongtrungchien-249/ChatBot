@@ -77,12 +77,12 @@ trên tài liệu của tổ chức (RAG), nhớ được thông tin người d�
 | **0** | Khôi phục 107 file, lockfile, CI, canary chứng minh các luật kiến trúc | Xong |
 | **1** | `shared/` `prompt/` `infra/` `llm/` `adapters/cli/` pipeline `main/` | Xong |
 | **2** | Ba tầng prompt + 5 khối + few-shot + context engineering; web adapter + UI + SSE | Xong |
-| **3** | Tool layer + ReAct (`web_search`, `paper_search`, vòng ReAct 6 chặn) | Xong |
+| **3** | Tool layer + ReAct, 6 chặn cứng, 6 lớp chống injection | Xong, **trừ `web_search`** — đã viết nhưng chưa chạy lần nào, thiếu `TAVILY_API_KEY` |
 | **P** | **Chuyển toàn bộ TypeScript → Python** | **Xong** — không còn dòng TypeScript nào |
-| **4** | Zalo Bot adapter | Xong tin nhắn riêng; **nhóm còn chờ mẫu payload thật** — xem §6 |
+| **4** | Zalo Bot adapter | **Xong** — cả tin riêng lẫn nhóm; rate limit 3 tầng; allowlist qua CLI |
 | **5** | Messenger adapter | Chưa |
 | **6** | RAG | Chưa |
-| **7** | Memory L2 + L3 | Xong phần explicit; **L3 implicit chưa bật** — xem §9 |
+| **7** | Memory L2 + L3 | **Xong** — L2, L3 explicit, L3 implicit (viết xong, `MEMORY_IMPLICIT_ENABLED=false`) |
 | **8** | Eval + monitoring + go-live | Chưa |
 
 ### 2b. Giai đoạn P — chuyển sang Python (xong 06/09/2026)
@@ -112,7 +112,7 @@ Kết quả: **0 file TypeScript, 0 file Node**. `package.json`, `tsconfig.json`
    `agents/policy/access.py` và `config` import ngược lên. Để nguyên thì phải khoét một lỗ trong L1,
    và canary sẽ không bao giờ đỏ nữa.
 
-**Trạng thái kiểm tra:** 179 test pytest xanh + 7 skip (khung test bảo mật) · mypy strict sạch 112
+**Trạng thái kiểm tra:** 290 test pytest xanh (0 skip khi có Docker) · mypy strict sạch 130
 file · ruff sạch · `lint-imports` **5 hợp đồng KEPT** · `guard_env.py` + `guard_sql.py` xanh · canary
 **8/8 luật sống**.
 
@@ -201,6 +201,7 @@ khi chạy `0001`.
 | `0004_knowledge_1024.sql` | `kb_document`, `kb_chunk` | L4. Số chiều nằm trong **tên file** |
 | `0005_ops.sql` | `usage_log`, `thread_allowlist`, `schema_migration` | Vận hành |
 | `0006_message_direction.sql` | cột `from_bot` | Câu trả lời của bot cũng phải lưu |
+| `0007_thread_meta.sql` | `thread_meta` | Tên hội thoại do người dùng đặt. Bảng riêng: tên thuộc về cả thread, và `thread_summary` do **model** sinh nên job tóm tắt sẽ ghi đè |
 
 **Không gian khoá Redis** — mọi khoá đều có TTL, không cái nào là nguồn thật:
 
@@ -212,7 +213,9 @@ khi chạy `0001`.
 
 ## 5. Giai đoạn 3 — Tool layer + ReAct
 
-Hiện bot nói thật rằng *"mình có thể tra cứu web khi được bật công cụ"*. Câu đó đúng: công cụ chưa tồn tại.
+`paper_search` đã chạy thật (6 bài báo kèm DOI đúng). `web_search` đã viết xong nhưng **chưa chạy lần nào** —
+`TAVILY_API_KEY` còn trống nên `tools.specs()` không khai nó ra, và bot mô tả năng lực của mình đúng theo
+thực tế đó.
 
 ### 5.1 ReAct nằm ở đâu
 
@@ -418,23 +421,35 @@ vì `within_daily_budget()` đọc Redis riêng và tự fail-closed.
 (10/phút = 1 token mỗi 6 giây). 12 unit test + **9 integration test chạy trên Redis thật** — bộ
 `tests/integration` trước đó có 0 file.
 
-### Còn hở: mention trong nhóm
+### Mention trong nhóm — đã đóng bằng payload thật
 
-Zalo **chưa công bố tài liệu** cách nhóm biểu diễn mention (chat nhóm đang Beta), và tên hiển thị của
-bot là `Bot CP Assistant` trong khi `BOT_MENTION_NAME=CP_Assistant,CP`. Nếu Zalo chèn `@Bot CP
-Assistant` vào text thì regex **không khớp** và bot sẽ im lặng trong nhóm.
+Đo trên tin nhóm thật ngày 06/09/2026, không phải suy đoán. Payload nhóm có đúng năm trường —
+`['chat', 'date', 'from', 'message_id', 'text']` — và **không có trường mention nào**. Zalo chèn thẳng
+**tên hiển thị** của bot vào `text`:
 
-`polling.py` ghi lại **tên các trường** (không ghi giá trị, để không lộ nội dung tin) của tin nhóm đầu
-tiên — đó là cách rẻ nhất để biết hình dạng thật thay vì đoán. Nhắn một câu vào nhóm rồi đọc log là
-đóng được chỗ này.
+```
+text='@Bot CP Assistant xin chào'
+```
 
-**Xong khi:** bot trả lời trong tin nhắn riêng (đã chạy được); trong nhóm thì còn chờ mẫu payload thật.
-Gửi lại cùng `message_id` → không có tin thứ hai.
+Zalo bắt tên bot phải mở đầu bằng `Bot`, nên tên hiển thị khác cả hai tên bot tự xưng. Ba chỗ phải sửa:
+
+1. `BOT_MENTION_NAME=CP_Assistant,CP,Bot_CP_Assistant` — gạch dưới khớp cả khoảng trắng.
+2. **System prompt đang nói sai.** Nó khẳng định *"hai cách duy nhất để gọi bạn"*, khiến bot bảo người
+   dùng Zalo rằng cách gọi vừa dùng sẽ không tới được nó.
+3. **Một test kiểm sai chiều.** Nó bắt *mọi* alias phải xuất hiện trong prompt — tức là sẽ **chặn đúng
+   bản sửa này**. Ràng buộc thật là chiều ngược lại: tên nào prompt **quảng bá** thì nhóm phải nhận diện
+   được; alias do nền tảng tự chèn thì không cần quảng bá.
+
+Vì `_mentioned_bot()` luôn trả `False` trên Zalo, lớp regex trong `agents/policy/mention.py` là lớp
+**duy nhất** đang làm việc. Nếu một ngày Zalo thêm trường mention thì `tests/contract` sẽ đỏ — đó là
+lúc bật lớp một lên.
+
+**Xong khi:** bot trả lời cả tin riêng lẫn trong nhóm (đã chạy được). Gửi lại cùng `message_id` →
+không có tin thứ hai.
 
 **Chưa làm, cố ý:** route webhook. `ZALO_WEBHOOK_SECRET` vẫn là placeholder và Zalo không công bố sơ đồ
 ký chữ ký — viết phần xác minh bằng cách đoán là loại lỗi hỏng im lặng. `ingest()` đã tách sẵn để route
-webhook chỉ là vài dòng khi có tài liệu. Nối tiếp `04-ratelimit` (token bucket Lua atomic) và
-`14-account` cũng chưa làm.
+webhook chỉ là vài dòng khi có tài liệu.
 
 ---
 
@@ -634,8 +649,11 @@ mỗi lần chạy tốn tiền thật.
 
 ### Monitoring
 
-`/api/health` · `/metrics` · Grafana (tin/ngày, latency p95, cost/ngày, tỉ lệ lỗi) · alert: webhook
-lỗi liên tiếp, token sắp hết hạn, chi phí vượt ngưỡng.
+Hiện **chỉ có `/api/health`**. `/metrics` và Grafana chưa tồn tại (`ops/grafana/` mới có `.gitkeep`).
+
+Thứ tự đề nghị, rẻ trước: `usage_log` **đã có dữ liệu thật** nên một lệnh `cli stats` đọc thẳng từ đó
+dùng được ngay hôm nay và không cần dựng gì. `/metrics` + Grafana (tin/ngày, latency p95, cost/ngày,
+tỉ lệ lỗi) sau. Alert: webhook lỗi liên tiếp, token sắp hết hạn, chi phí vượt ngưỡng.
 
 **LangSmith (D11):** bọc client bằng wrapper của LangSmith, đúng một chỗ trong `llm/openai_client.py`.
 `container.py` **chỉ bọc khi `NODE_ENV == 'development'`** — kể cả cờ bật ở production cũng không bọc.
@@ -673,10 +691,11 @@ ZALO_BOT_TOKEN  ZALO_MODE  ZALO_WEBHOOK_SECRET      # GĐ 4
 META_APP_SECRET  META_PAGE_TOKEN  META_VERIFY_TOKEN # GĐ 5
 BOT_MENTION_NAME  GROUP_POLICY  DM_POLICY
 RL_USER_PER_MIN=10  RL_THREAD_PER_MIN=30
+MEMORY_IMPLICIT_ENABLED=false       # L3 implicit — bot TU trich fact. Mac dinh TAT
 WEB_PORT=3000  WEB_BIND=127.0.0.1
 DAILY_BUDGET_USD                    # bắt buộc, KHÔNG có mặc định
-TAVILY_API_KEY                      # GĐ 3
-REACT_MAX_ITERATIONS=5  REACT_MAX_TOOL_CALLS=8      # GĐ 3
+TAVILY_API_KEY  SEMANTIC_SCHOLAR_API_KEY            # GĐ 3; S2 tuy chon, khong khoa thi bi 429
+REACT_MAX_ITERATIONS=5  REACT_MAX_TOOL_CALLS=8  REACT_DEADLINE_MS=60000
 ```
 
 Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ `docker-compose`.
@@ -689,12 +708,49 @@ Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ
 |---|---|---|---|
 | Unit | `tests/unit` — chỉ `agents/` | mọi commit | **Không I/O, < 2s.** Đây là lý do tồn tại của ports |
 | Contract | `tests/contract` — adapter ăn fixtures thật | mọi commit | Ghi payload thật một lần, dùng mãi |
-| Integration | `tests/integration` — Postgres + Redis + embedding thật | mọi PR | Tự bỏ qua nếu không có, **có nêu lý do** |
-| Security | `tests/security` — rò rỉ cross-thread | mọi PR | **Không được phép xoá** |
+| Integration | `tests/integration` — Postgres + Redis + embedding thật | mọi PR | Máy bạn: bỏ qua có nêu lý do. **CI: ĐỎ** — xem dưới |
+| Security | `tests/security` — rò rỉ cross-thread | mọi PR | **Không được phép xoá**, và trên CI không được phép bỏ qua |
 | Eval | `evals/` — 50 câu | khi đổi prompt/chunking/model | Ngưỡng ở §10 |
 
-**290 test**, cả bốn tầng đều có file. Ba tầng dưới cần Docker; chúng tự bỏ qua khi thiếu, nhưng
-**không bỏ qua im lặng** — dòng skip luôn nêu lý do.
+**290 test**, cả bốn tầng đều có file.
+
+### Bỏ qua im lặng — lỗ hổng đã bịt (07/09/2026)
+
+Ba tầng dưới cần Docker. Trước đây chúng **tự bỏ qua** khi thiếu — và CI thì chỉ có `uv run pytest`
+trần, không Postgres, không Redis, không biến môi trường. Hậu quả: **40 test không bao giờ chạy trên
+CI**, trong đó có **cả bảy test `cross-thread-leak`**. Mà bỏ qua vẫn cho ra báo cáo màu **xanh**.
+
+Đó là cách một bộ test bảo mật chết mà không ai hay: không ai xoá nó, nó chỉ lặng lẽ thôi chạy. Chúng
+chỉ xanh khi tình cờ có ai bật Docker ở máy mình.
+
+Hai phần sửa:
+
+1. **`.github/workflows/ci.yml` dựng service thật** — `pgvector/pgvector:pg16` (bản Postgres trần không
+   có extension `vector`, migration `0001` sẽ hỏng) và `redis:7-alpine`. Cộng một khối `env:` **giả**,
+   vì `config/schema.py` bắt buộc một loạt biến không có mặc định còn `.env` nằm trong `.gitignore` —
+   thiếu chúng thì `Settings()` nổ ngay lần đọc đầu tiên. Bước `migrate` chạy **hai lần**: bảng trống
+   thì test tích hợp đỏ ở câu `SELECT` đầu tiên, và lần hai kiểm luôn tính bất biến "không làm gì".
+
+2. **`tests/conftest.py` đổi nghĩa của "bỏ qua" theo ngữ cảnh:**
+
+   | | Máy bạn | CI (`CI=true`) |
+   |---|---|---|
+   | Thiếu Postgres / Redis | bỏ qua | **ĐỎ** |
+   | Thiếu khoá OpenAI | bỏ qua | bỏ qua **+ `::warning::`** |
+
+   Postgres và Redis do chính workflow dựng lên, nên thiếu chúng là lỗi cấu hình CI. Còn khoá OpenAI
+   phải do chủ repo thêm vào Secrets — không có nó là **lựa chọn hợp lệ**, nhưng phải kêu to chứ không
+   được lặng lẽ xanh. Chưa thêm secret thì 23 test dùng embedding thật (16 `fact_repo` + 7
+   `cross-thread-leak`) vẫn nằm ngoài vùng bảo vệ, và mỗi lần chạy CI sẽ nói đúng điều đó.
+
+Bốn nhánh hành vi đã kiểm chứng, không suy đoán:
+
+```
+CI=true + đủ service              → 290 passed
+CI=true + không Postgres          → ĐỎ, kèm câu chỉ rõ sửa ở đâu
+CI=true + EMBEDDING_PROVIDER=fake → 7 skipped + cảnh báo, không đỏ
+không CI + không Postgres         → 7 skipped   (đúng — đây là máy local)
+```
 
 **Một bài học về hạ tầng test.** `tests/contract` chạy trên payload Zalo **thật đã ghi lại**, không phải
 payload tôi tự nghĩ ra. Khác biệt không nhỏ: unit test chạy trên payload tự nghĩ chỉ chứng minh code
@@ -729,8 +785,11 @@ Truy vấn kiểm tra sức khoẻ:
 SELECT route, model, avg(input_tokens), avg(output_tokens), avg(cost_usd), avg(latency_ms)
 FROM usage_log WHERE ok GROUP BY route, model;
 
--- Prompt caching có ăn không. Bằng 0 mãi = chưa vượt ngưỡng 2048 token
-SELECT sum(cache_read_tokens) FROM usage_log;
+-- Prompt caching co an khong. Do 06/09/2026: 20/32 luot co cache, 1408-1792 token.
+-- 1408 = 11 x 128 (buoc chia block cua OpenAI) -> phan duoc cache chinh la system prompt.
+SELECT count(*) FILTER (WHERE cache_read_tokens > 0) AS co_cache, count(*) AS tong,
+       round(avg(cache_read_tokens) FILTER (WHERE cache_read_tokens > 0)) AS tb_khi_an
+FROM usage_log WHERE ok;
 ```
 
 ---
@@ -743,7 +802,7 @@ SELECT sum(cache_read_tokens) FROM usage_log;
 | Vòng ReAct đốt tiền | Trung bình | 5 chặn cứng; `withinDailyBudget()` mỗi vòng |
 | Rò rỉ memory cross-group | Thấp | `ThreadScope` bắt buộc + 7 test bắt buộc + `guard:sql` |
 | Meta App Review từ chối | **Cao** | Nộp kèm screencast luồng thật; Business Verification từ sớm |
-| Latency vượt 5s khi thêm tool | Trung bình | Đang 3,2–4,3s. Deadline ReAct 60s web / 15s chat |
+| Latency vượt 5s | **Đang xảy ra** | p95 **8,5s** trên 32 lượt (§2). Lượt chậm nhất 12,5s **không** dùng tool — nó sinh 1.082 token đầu ra, nên nghi can là độ dài câu trả lời chứ không phải tool. Mẫu còn nhỏ; đo thêm rẻ hơn tối ưu mù |
 | Chất lượng tiếng Việt của `gpt-5-mini` | Trung bình | Eval đo; đổi model là sửa `llm/models.py`, một file |
 | Group API Zalo đổi hành vi | Trung bình | Đảm bảo DM vẫn dùng được; fixtures bắt sớm |
 | Chạm trần `concurrency: 1` | Thấp | ~240 câu/giờ, mục tiêu 200–1000 câu/**ngày**. Chạm thì tự khoá phân tán per-thread bằng Redis |
@@ -752,10 +811,11 @@ SELECT sum(cache_read_tokens) FROM usage_log;
 
 ## 15. Quyết định còn mở
 
-1. **Tên bot trong nhóm Zalo.** Tên hiển thị của bot trên Zalo là `Bot CP Assistant`, còn
-   `BOT_MENTION_NAME=CP_Assistant,CP`. Nếu Zalo chèn `@Bot CP Assistant` vào text thì regex không khớp
-   và bot im lặng trong nhóm. Chờ một mẫu payload nhóm thật — xem §6.
-2. **`DAILY_BUDGET_USD`** chính thức — đang để 2. Ở $0,00073/câu thì 2 USD ≈ 2.700 câu/ngày.
-3. **Embedding + rerank** — chốt ở GĐ 6 sau benchmark.
-4. **Thư viện đọc pdf/docx** — đề xuất `pypdf` + `python-docx` (đề xuất cũ `unpdf` + `mammoth` là thư
+1. **`DAILY_BUDGET_USD`** chính thức — đang để 2. Ở $0,00073/câu thì 2 USD ≈ 2.700 câu/ngày.
+2. **Rerank** — embedding đã chốt (`text-embedding-3-large`, `dimensions=1024`, xem §9). Còn lại đúng
+   nhà cung cấp rerank: OpenAI **không có** rerank nên phải là nhà thứ hai (Cohere / Jina / Voyage).
+   §8 yêu cầu benchmark trên tài liệu thật trước khi viết code, nhưng chưa có tài liệu — **vòng lặp
+   chặn**. Cắt bằng cách chọn một mặc định để viết được, benchmark khi tài liệu về; đổi nhà cung cấp
+   là sửa một file.
+3. **Thư viện đọc pdf/docx** — đề xuất `pypdf` + `python-docx` (đề xuất cũ `unpdf` + `mammoth` là thư
    viện Node, không dùng được nữa).
