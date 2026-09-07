@@ -1,0 +1,47 @@
+# Cảnh báo đi đâu.
+#
+# ĐỌC KỸ: mặc định ở đây KHÔNG gửi đi đâu cả — nó chỉ hiện trong trang Alerting của
+# Grafana. Đó là lựa chọn có chủ đích, không phải chỗ làm dở:
+#
+#   - Nhét sẵn một webhook giả thì cảnh báo "đã gửi" vào hư không, và bảng điều khiển
+#     báo màu xanh trong khi không ai nhận được gì. Một kênh báo hỏng còn tệ hơn không
+#     có kênh nào, vì nó tạo cảm giác đã được canh chừng.
+#   - Địa chỉ email hay webhook Slack là bí mật của từng người vận hành, không thuộc
+#     về repo.
+#
+# ĐỂ NHẬN ĐƯỢC CẢNH BÁO THẬT, thay khối `receivers` bên dưới bằng kênh của bạn, ví dụ:
+#
+#   receivers:
+#     - uid: cp-mac-dinh
+#       type: slack
+#       settings:
+#         url: $SLACK_WEBHOOK_URL      # đọc từ biến môi trường của container grafana
+#
+# hoặc `type: email` (cần cấu hình SMTP cho Grafana), `type: webhook`, `type: telegram`.
+# Danh sách đầy đủ: https://grafana.com/docs/grafana/latest/alerting/configure-notifications/
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: cp-assistant
+    receivers:
+      # `type: webhook` trỏ vào chính Grafana: cảnh báo được ghi nhận và hiện trong
+      # giao diện, nhưng không rời khỏi máy. Thay bằng kênh thật khi cần.
+      - uid: cp-mac-dinh
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://localhost:3000/api/health
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: cp-assistant
+    group_by: [alertname]
+    # Gom trong 5 phút rồi mới gửi: bốn luật ở đây đều đo theo cửa sổ dài, nên báo
+    # ngay từng cái một chỉ tạo tiếng ồn.
+    group_wait: 5m
+    group_interval: 10m
+    # Nhắc lại mỗi 12 tiếng nếu vẫn chưa hết. Ngắn hơn thì người ta học cách bỏ qua.
+    repeat_interval: 12h
