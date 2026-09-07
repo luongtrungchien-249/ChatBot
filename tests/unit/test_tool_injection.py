@@ -10,12 +10,13 @@ import pytest
 
 from agents.domain.thread import ThreadScope
 from agents.pipeline.stages.generate import GenerateDeps, generate
+from agents.policy.injection import detect_injection
 from agents.ports.llm import CallContext, ToolCall, UserMessage
 from agents.ports.tool import ToolResult
 from agents.prompt.budget import CHARS_PER_TOKEN, TOKEN_BUDGET
 from agents.prompt.context import ContextEnvelope
 from shared.result import Ok
-from tools.guard import detect_injection, exceeds_tool_budget, wrap_observation
+from tools.guard import exceeds_tool_budget, wrap_observation
 
 from .fakes import TOOL_DEF, FakeLlm, FakeLogger, FakeRateLimit, FakeTools, answer, wants_tools
 

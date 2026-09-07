@@ -18,8 +18,8 @@ thuong can xem, khong phai chuyen binh thuong (xem budget.py).
 
 from dataclasses import dataclass, field
 
+from ..domain.knowledge import RetrievedChunk
 from ..domain.message import StoredMessage
-from ..ports.knowledge import RetrievedChunk
 from ..ports.llm import AssistantMessage, LlmMessage, UserMessage
 from ..ports.logger import LoggerPort
 from ..ports.memory import Fact

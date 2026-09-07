@@ -6,19 +6,16 @@ terminal, worker gui qua adapter cua tung nen tang).
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from agents.domain.thread import Platform
 from agents.pipeline.handle_message import Deps, ReactLimits, ReplyModel
 from agents.policy.access import AccessRules
 from agents.ports.channel import ChannelPort
-from agents.ports.knowledge import KnowledgePort
 from config import get_settings
 from infra.allowlist import load_allowed_threads
 from infra.db import fetch
 from infra.logger import get_logger
 from infra.ratelimit import rate_limit
-from knowledge.retrieve.service import knowledge as hybrid_knowledge
 from llm.models import MODELS
 from llm.openai_client import llm
 from memory.repository.fact_repo import FACT_TABLE
@@ -55,11 +52,6 @@ _DEADLINE_MS: dict[Platform, int] = {
     "zalo_bot": 45_000,
     "zalo_personal": 45_000,
 }
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,16 +140,13 @@ async def build_deps(channel: ChannelPort, platform: Platform | None = None) -> 
         tools=[s.name for s in specs],
     )
 
-    knowledge: KnowledgePort = hybrid_knowledge
     reply_model = MODELS["reply"]
 
     return Deps(
         llm=llm,
         memory=message_repo,
-        knowledge=knowledge,
         channel=channel,
         rate_limit=rate_limit,
-        clock=SystemClock(),
         logger=log,
         tools=tool_port,
         access_rules=AccessRules(

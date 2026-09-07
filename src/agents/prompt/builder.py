@@ -2,8 +2,8 @@
 
 import re
 
+from ..domain.knowledge import RetrievedChunk
 from ..domain.message import StoredMessage
-from ..ports.knowledge import RetrievedChunk
 from ..ports.memory import Fact
 from .budget import trim_to_budget
 

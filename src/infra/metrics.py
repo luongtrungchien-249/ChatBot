@@ -27,6 +27,24 @@ class RouteStats:
 
 
 @dataclass(frozen=True, slots=True)
+class TurnStats:
+    """Do tre theo LUOT — thu nguoi dung thuc su cam nhan.
+
+    `usage_log.latency_ms` la do tre cua MOT LAN GOI. Mot luot co tra cuu gom nhieu
+    lan goi model cong nhieu lan chay cong cu, nen hai con so do lech nhau vai lan.
+    Cong theo `trace_id` moi ra dung thu de so voi muc tieu — moi buoc trong mot luot
+    deu mang cung mot trace_id (luat L8).
+    """
+
+    #: True = luot nay co tra cuu.
+    used_tools: bool
+    turns: int
+    p50_ms: int
+    p95_ms: int
+    max_ms: int
+
+
+@dataclass(frozen=True, slots=True)
 class CacheStats:
     """Prompt caching co dang an khong.
 
@@ -71,6 +89,50 @@ async def route_stats(days: int = 7) -> list[RouteStats]:
             cost_usd=float(r["cost_usd"]),
             avg_latency_ms=int(r["avg_latency"]),
             p95_latency_ms=int(r["p95_latency"]),
+        )
+        for r in rows
+    ]
+
+
+async def turn_stats(days: int = 7) -> list[TurnStats]:
+    """Do tre tung luot, tach theo CO/KHONG tra cuu.
+
+    Muc tieu khac nhau cho hai nhom, va do la ly do phai tach: mot luot co tra cuu bat
+    buoc hai lan goi model cong thoi gian chay cong cu, nen ep no ve cung muc voi luot
+    khong tra cuu la ep bo tra cuu. Gop chung lai thi khong biet dang truot cai nao.
+
+    Bo qua route `embed`: no chay ca ngoai duong phan hoi (job nen, trich fact) nen
+    cong vao se lam do tre luot trong sai lech.
+    """
+    rows = await fetch(
+        """WITH luot AS (
+             SELECT trace_id,
+                    -- Mot luot CO tra cuu la mot luot co it nhat mot buoc route='tool'.
+                    -- Khong dung mot cot rieng: xem db/migrations/0010.
+                    bool_or(route = 'tool') AS co_tra_cuu,
+                    sum(latency_ms)         AS tong_ms
+               FROM usage_log
+              WHERE route IN ('reply', 'tool')
+                AND created_at > now() - ($1 || ' days')::interval
+              GROUP BY trace_id
+           )
+           SELECT co_tra_cuu,
+                  count(*)                                          AS luot,
+                  percentile_disc(0.5)  WITHIN GROUP (ORDER BY tong_ms) AS p50,
+                  percentile_disc(0.95) WITHIN GROUP (ORDER BY tong_ms) AS p95,
+                  max(tong_ms)                                      AS mx
+             FROM luot
+            GROUP BY co_tra_cuu
+            ORDER BY co_tra_cuu""",
+        str(days),
+    )
+    return [
+        TurnStats(
+            used_tools=bool(r["co_tra_cuu"]),
+            turns=int(r["luot"]),
+            p50_ms=int(r["p50"]),
+            p95_ms=int(r["p95"]),
+            max_ms=int(r["mx"]),
         )
         for r in rows
     ]
@@ -131,6 +193,7 @@ async def prometheus_text(days: int, budget_usd: float) -> str:
     """
     routes = await route_stats(days)
     cache = await cache_stats(days)
+    turns = await turn_stats(days)
     spent, budget = await budget_today(budget_usd)
 
     out: list[str] = [
@@ -158,6 +221,17 @@ async def prometheus_text(days: int, budget_usd: float) -> str:
     ]
     for r in routes:
         out.append(_line("cp_llm_latency_p95_ms", f'route="{r.route}"', r.p95_latency_ms))
+    out += [
+        "# HELP cp_turn_latency_p95_ms Do tre CA LUOT — thu nguoi dung cam nhan.",
+        "# Muc tieu: khong tra cuu < 5000, co tra cuu < 15000.",
+        "# TYPE cp_turn_latency_p95_ms gauge",
+    ]
+    for t in turns:
+        tag = f'used_tools="{str(t.used_tools).lower()}"'
+        out.append(_line("cp_turn_latency_p95_ms", tag, t.p95_ms))
+    out += ["# HELP cp_turns_total So luot tra loi.", "# TYPE cp_turns_total gauge"]
+    for t in turns:
+        out.append(_line("cp_turns_total", f'used_tools="{str(t.used_tools).lower()}"', t.turns))
     out += [
         "# HELP cp_prompt_cache_hit_ratio Ti le luot tra loi doc duoc cache. Tut ve 0 la",
         "# tien to on dinh cua prompt da vo — xem agents/prompt/system.py.",

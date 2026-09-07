@@ -133,10 +133,11 @@ chatbot/
 │  │  ├─ domain/
 │  │  │  ├─ message.py             # InboundMessage, OutboundMessage, StoredMessage
 │  │  │  ├─ thread.py              # ThreadScope — khoá chống rò rỉ
+│  │  │  ├─ knowledge.py           # RetrievedChunk — GIÁ TRỊ, không phải hợp đồng
 │  │  │  └─ errors.py              # Taxonomy lỗi (§9)
 │  │  ├─ ports/                    # Protocol — agents chỉ biết đến những cái này
-│  │  │  ├─ llm.py  memory.py  knowledge.py  channel.py
-│  │  │  ├─ ratelimit.py  clock.py  logger.py
+│  │  │  ├─ llm.py  memory.py  channel.py
+│  │  │  ├─ ratelimit.py  logger.py
 │  │  │  └─ tool.py                # ToolPort — công cụ gọi mạng nên đứng sau port
 │  │  ├─ policy/
 │  │  │  ├─ mention.py             # Bóc @ten_bot: 2 lớp payload + regex có dấu tiếng Việt
@@ -163,7 +164,7 @@ chatbot/
 │  │  ├─ jobs/                     # summarize.py, extract_facts.py (async)
 │  │  └─ dedupe.py                 # Chống trùng / mâu thuẫn fact bằng cosine
 │  │
-│  ├─ knowledge/                   # L4 RAG — implement KnowledgePort
+│  ├─ knowledge/                   # L4 RAG — dùng qua công cụ search_knowledge_base
 │  │  ├─ ingest/                   # extract.py, chunk.py, pipeline.py
 │  │  └─ retrieve/                 # search.py (vector+lexical), fusion.py, service.py
 │  │
@@ -205,6 +206,7 @@ chatbot/
 │  │  ├─ cancel.py                 # Cờ dừng qua Redis (api và worker là hai process)
 │  │  ├─ allowlist.py              # Bảng thread_allowlist
 │  │  ├─ ratelimit.py              # Token bucket 3 tầng (Lua) + chốt chặn ngân sách ngày
+│  │  ├─ http.py                   # MỘT pool kết nối HTTP cho cả process (§16.8)
 │  │  └─ metrics.py                # Đọc usage_log → `cli stats` và /api/metrics
 │  │
 │  └─ shared/
@@ -218,7 +220,8 @@ chatbot/
 │  │  ├─ 0002_messages.sql         0005_ops.sql
 │  │  ├─ 0003_memory.sql           0006_message_direction.sql
 │  │  ├─                           0007_thread_meta.sql
-│  │  └─                           0008_kb_tsv_embed_input.sql
+│  │  ├─                           0008_kb_tsv_embed_input.sql
+│  │  └─ 0009_usage_tools.sql      0010_drop_used_tools.sql   ← xem plan §19
 │  └─ seed/
 │
 ├─ evals/
@@ -243,7 +246,8 @@ chatbot/
 │  ├─ benchmark_embedding.py       # So sanh model embedding tren du lieu that
 │  ├─ benchmark_rerank.py          # So sanh nha cung cap rerank + de xuat nguong
 │  ├─ prometheus.yml               # Scrape /api/metrics moi 30s
-│  └─ grafana/                     # Datasource + dashboard cam san (mã nguồn, không chỉnh tay)
+│  └─ grafana/                     # Datasource + dashboard + 4 luật cảnh báo, cắm sẵn
+│                                 #   (mã nguồn, không chỉnh trong giao diện rồi quên)
 │
 ├─ docs/                           # master-plan, plan-thi-cong, dep-rules-verified, archive/
 ├─ .importlinter                   # cưỡng chế luật ở §1
@@ -262,6 +266,12 @@ chatbot/
 
 Port là `typing.Protocol`, không phải lớp cơ sở: cấu trúc khớp là đủ, nên `structlog.BoundLogger` cắm
 thẳng vào `LoggerPort` mà không cần một lớp adapter chỉ để thoả kế thừa.
+
+**Sáu port, sau khi dọn ngày 08/09/2026.** `KnowledgePort` và `ClockPort` đã bị xoá:
+cả hai được khai báo, tiêm vào `Deps`, và **không chỗ nào gọi**. Đường tra cứu thật đi
+qua công cụ `search_knowledge_base`, tức qua `ToolPort`. Dự án này có một câu riêng cho
+chuyện đó — *"thêm port là quyết định kiến trúc, không phải tiện tay"* — và một port
+chết còn tệ hơn không có port, vì người đọc sau sẽ tưởng đó là đường đi thật.
 
 ```python
 # agents/domain/thread.py
@@ -301,11 +311,6 @@ class MemoryPort(Protocol):
     async def forget(self, scope: ThreadScope, actor_id: str, pattern: str) -> list[Fact]: ...
     async def list_facts(self, scope: ThreadScope, subject_id: str) -> list[Fact]: ...
 # Mọi phương thức nhận ThreadScope ở tham số ĐẦU TIÊN. Không có biến thể nào bỏ nó.
-
-# agents/ports/knowledge.py
-class KnowledgePort(Protocol):
-    async def search(self, query: str, k: int) -> list[RetrievedChunk]: ...
-    # đã fusion + rerank + lọc ngưỡng. Rỗng = "không tìm thấy", không phải lỗi.
 
 # agents/ports/channel.py
 class ChannelPort(Protocol):

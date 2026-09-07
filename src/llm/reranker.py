@@ -120,7 +120,7 @@ _WORD = re.compile(r"[0-9a-z]+")
 
 
 def _terms(text: str) -> set[str]:
-    from tools.guard import fold_diacritics
+    from agents.policy.injection import fold_diacritics
 
     return {t for t in _WORD.findall(fold_diacritics(text).lower()) if len(t) > 1}
 

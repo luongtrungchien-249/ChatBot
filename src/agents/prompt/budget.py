@@ -34,7 +34,11 @@ TOKEN_BUDGET: dict[BudgetLayer, int] = {
     # 1408-1792 o 20/32 lan goi. OpenAI chia cache theo block 128 token, va 1408 =
     # 11 x 128 — tuc la phan duoc cache chinh la SYSTEM PROMPT. Do la ly do thuc te
     # thu hai, ben canh tinh tai lap, de giu chuoi nay dong bang.
-    "system": 2_600,
+    # Noi 2600 -> 3200 (08/09/2026) de chua khoi CONG BANG va ranh gioi tu chu.
+    # Prompt dai them ~800 token, nhung `cli stats` cho thay 85% luot doc duoc
+    # cache, va input duoc cache tinh $0,025/1M — tuc phan them chi ton them
+    # khoang $0,00002 moi cau. Doi lai la bon rui ro co luat thanh van.
+    "system": 3_200,
     "knowledge": 20_000,
     "facts": 4_000,
     "summary": 4_000,

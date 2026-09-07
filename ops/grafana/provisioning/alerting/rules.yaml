@@ -1,0 +1,146 @@
+# Cảnh báo — bốn thứ mà nếu không tự báo thì sẽ không ai phát hiện.
+#
+# Tiêu chí chọn: mỗi luật ở đây phải là thứ **hỏng trong im lặng**. Một lỗi ồn ào tự
+# nó đã báo rồi; cái nguy hiểm là cái chạy xanh trong lúc mất tiền hoặc mất chất lượng.
+#
+# Dashboard là mã nguồn, luật cảnh báo cũng vậy: sửa trong giao diện Grafana thì lần
+# dựng stack sau sẽ ghi đè. Sửa ở đây rồi commit.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: cp-assistant
+    folder: CP Assistant
+    # Prometheus scrape 30s; kiểm mỗi phút là đủ dày cho thứ đo theo ngày.
+    interval: 1m
+    rules:
+      # ---------------------------------------------------------------- 1
+      - uid: cp-budget
+        title: Ngân sách ngày sắp cạn
+        condition: nguong
+        # DAILY_BUDGET_USD là chốt chặn CỨNG: chạm trần là bot từ chối trả lời tới
+        # hết ngày. Báo ở 80% để còn kịp làm gì đó, không phải báo lúc đã dừng.
+        for: 5m
+        annotations:
+          summary: Đã dùng hơn 80% ngân sách ngày
+          description: >-
+            Chạm 100% là bot ngừng trả lời tới hết ngày (giờ Việt Nam).
+            Xem `uv run python -m main.cli stats 1` để biết tiền đi vào route nào.
+        labels: { severity: canh-bao }
+        data:
+          - refId: ti_le
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: cp_budget_spent_usd / clamp_min(cp_budget_limit_usd, 0.0001)
+              instant: true
+              refId: ti_le
+          - refId: nguong
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: ti_le
+              conditions:
+                - evaluator: { type: gt, params: [0.8] }
+              refId: nguong
+
+      # ---------------------------------------------------------------- 2
+      - uid: cp-cache
+        title: Prompt caching đã tắt
+        condition: nguong
+        # Tỉ lệ cache về 0 nghĩa là tiền tố ổn định của prompt đã vỡ — thường là ai đó
+        # nội suy một biến vào đầu SYSTEM_PROMPT. Hậu quả: trả giá đầy đủ cho ~2400
+        # token ở MỌI câu hỏi, đắt gấp 10 lần, và không có triệu chứng nào khác.
+        #
+        # 15 phút để một quãng nghỉ dài không tự làm nó kêu.
+        for: 15m
+        annotations:
+          summary: Không lượt nào đọc được prompt cache
+          description: >-
+            Kiểm `agents/prompt/system.py` xem SYSTEM_PROMPT có còn là hằng số không.
+            Input được cache tính $0,025/1M thay vì $0,25/1M.
+        labels: { severity: canh-bao }
+        data:
+          - refId: ti_le
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: cp_prompt_cache_hit_ratio
+              instant: true
+              refId: ti_le
+          - refId: nguong
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: ti_le
+              conditions:
+                - evaluator: { type: lt, params: [0.05] }
+              refId: nguong
+
+      # ---------------------------------------------------------------- 3
+      - uid: cp-loi-model
+        title: Tỉ lệ lỗi gọi model quá cao
+        condition: nguong
+        # Người dùng vẫn nhận câu fallback nên nhìn từ ngoài bot "vẫn sống". Lỗi kéo
+        # dài thường là khoá sai/hết hạn (401/403) — thứ retry không bao giờ chữa được.
+        #
+        # Đo TỈ LỆ chứ không đếm số tuyệt đối. Bản đầu dùng `sum(errors) > 0`, và thử
+        # chạy thật cho thấy nó sai: metric là số lỗi tích luỹ trong 24h, nên một lỗi
+        # thoáng qua duy nhất sẽ giữ cảnh báo kêu suốt một ngày. Một cảnh báo kêu vì
+        # chuyện không đáng là một cảnh báo người ta học cách bỏ qua — và rồi bỏ qua
+        # luôn lần nó kêu đúng.
+        for: 10m
+        annotations:
+          summary: Hơn 5% lượt gọi model bị lỗi trong 24h qua
+          description: >-
+            Xem log tìm 401/403 (khoá sai — phải sửa env) hay 5xx (upstream).
+            `uv run python -m main.cli stats 1`.
+        labels: { severity: canh-bao }
+        data:
+          - refId: loi
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                sum(cp_llm_errors_total) / clamp_min(sum(cp_llm_calls_total), 1)
+              instant: true
+              refId: loi
+          - refId: nguong
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: loi
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+              refId: nguong
+
+      # ---------------------------------------------------------------- 4
+      - uid: cp-do-tre
+        title: Lượt có tra cứu quá chậm
+        condition: nguong
+        # Đo theo LƯỢT, không theo lần gọi: người dùng chờ cả vòng ReAct. Vượt 15s
+        # thì deadline Zalo (45s) sắp bị chạm, và chạm là câu trả lời bị vứt đi.
+        for: 10m
+        annotations:
+          summary: p95 lượt có tra cứu vượt 15s
+          description: >-
+            Kiểm công cụ nào đang chậm: `route = 'tool'` trong usage_log.
+            Chạm deadline ReAct là toàn bộ kết quả tra cứu bị bỏ.
+        labels: { severity: canh-bao }
+        data:
+          - refId: p95
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: cp_turn_latency_p95_ms{used_tools="true"}
+              instant: true
+              refId: p95
+          - refId: nguong
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: p95
+              conditions:
+                - evaluator: { type: gt, params: [15000] }
+              refId: nguong
