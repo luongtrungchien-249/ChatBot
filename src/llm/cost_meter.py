@@ -86,6 +86,37 @@ async def record_embedding(
         _log.error("khong ghi duoc usage_log cho embedding", err=str(error))
 
 
+async def record_tool(
+    *, name: str, latency_ms: int, ok: bool, scope: ThreadScope, sender_id: str, trace_id: str
+) -> None:
+    """Ghi mot lan chay CONG CU.
+
+    Cong cu khong ton token va khong goi model, nhung no ton THOI GIAN — va thoi gian
+    do nam thang tren duong phan hoi. Truoc day no chi hien trong log, nen do tre that
+    cua mot luot (cong tat ca cac buoc) khong tinh duoc tu `usage_log`.
+
+    route = 'tool', model = ten cong cu. Cung loi ra nhu record_embedding: khong di
+    qua MODELS, vi bang do khai model sinh van ban.
+    """
+    try:
+        await execute(
+            """INSERT INTO usage_log
+                 (trace_id, platform, thread_id, sender_id, route, model,
+                  input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                  cost_usd, latency_ms, ok)
+               VALUES ($1,$2,$3,$4,'tool',$5,0,0,0,0,0,$6,$7)""",
+            trace_id,
+            scope.platform,
+            scope.thread_id,
+            sender_id,
+            name,
+            latency_ms,
+            ok,
+        )
+    except Exception as error:
+        _log.error("khong ghi duoc usage_log cho cong cu", tool=name, err=str(error))
+
+
 async def record(entry: UsageRecord) -> float:
     """Ghi mot lan goi.
 

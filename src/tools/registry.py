@@ -16,6 +16,7 @@ from agents.ports.llm import CallContext, ToolCall
 from agents.ports.tool import ToolDefinition, ToolResult
 from agents.prompt.instructions import COMPRESS_TOOL_RESULT_INSTRUCTION
 from infra.logger import get_logger
+from llm.cost_meter import record_tool
 from llm.models import MODELS
 from llm.openai_client import llm
 
@@ -104,6 +105,21 @@ async def _compress_if_too_long(raw: str, tool_name: str, ctx: CallContext) -> s
         return raw
 
 
+async def _ghi_so(call: ToolCall, ctx: CallContext, started: float, ok: bool) -> int:
+    """Do tre cua cong cu nam TREN duong phan hoi, nen no phai vao usage_log chu
+    khong chi vao log. Thieu no thi do tre that cua mot luot khong cong lai duoc."""
+    latency_ms = int((time.monotonic() - started) * 1000)
+    await record_tool(
+        name=call.name,
+        latency_ms=latency_ms,
+        ok=ok,
+        scope=ctx.scope,
+        sender_id=ctx.sender_id,
+        trace_id=ctx.trace_id,
+    )
+    return latency_ms
+
+
 async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
     started = time.monotonic()
     registration = next((r for r in _REGISTRY if r.definition.name == call.name), None)
@@ -118,7 +134,7 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
                 "Hãy trả lời bằng kiến thức sẵn có và nói rõ là không tra cứu được."
             ),
             ok=False,
-            latency_ms=int((time.monotonic() - started) * 1000),
+            latency_ms=await _ghi_so(call, ctx, started, ok=False),
         )
 
     try:
@@ -126,7 +142,7 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
         raw = await _compress_if_too_long(
             await registration.run(call.input, ctx.trace_id), call.name, ctx
         )
-        latency_ms = int((time.monotonic() - started) * 1000)
+        latency_ms = await _ghi_so(call, ctx, started, ok=True)
         _log.info("cong cu tra ve", trace_id=ctx.trace_id, tool=call.name, latency_ms=latency_ms)
 
         return ToolResult(
@@ -144,7 +160,7 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
             latency_ms=latency_ms,
         )
     except Exception as error:
-        latency_ms = int((time.monotonic() - started) * 1000)
+        latency_ms = await _ghi_so(call, ctx, started, ok=False)
         _log.error(
             "cong cu loi",
             trace_id=ctx.trace_id,
