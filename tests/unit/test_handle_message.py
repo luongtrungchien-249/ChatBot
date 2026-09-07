@@ -23,8 +23,6 @@ from agents.ports.llm import LlmResult, LlmUsage
 
 from .fakes import (
     FakeChannel,
-    FakeClock,
-    FakeKnowledge,
     FakeLlm,
     FakeLogger,
     FakeMemory,
@@ -41,10 +39,8 @@ def make_deps(**over: Any) -> Deps:
     base: dict[str, Any] = {
         "llm": FakeLlm(replies=[answer("Deadline la ngay 30/11.")]),
         "memory": FakeMemory(),
-        "knowledge": FakeKnowledge(),
         "channel": FakeChannel(),
         "rate_limit": FakeRateLimit(),
-        "clock": FakeClock(),
         "logger": FakeLogger(),
         "tools": FakeTools(definitions=()),
         "access_rules": AccessRules(

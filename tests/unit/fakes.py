@@ -6,12 +6,10 @@ truc da bi pha o dau do.
 """
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
 from agents.domain.message import InboundMessage, StoredMessage
 from agents.domain.thread import ThreadScope
-from agents.ports.knowledge import RetrievedChunk
 from agents.ports.llm import (
     CallContext,
     Effort,
@@ -162,11 +160,6 @@ class FakeMemory:
         return self.stored_facts
 
 
-class FakeKnowledge:
-    async def search(self, query: str, k: int) -> list[RetrievedChunk]:
-        return []
-
-
 @dataclass
 class FakeChannel:
     sent: list[str] = field(default_factory=list)
@@ -239,7 +232,3 @@ class FakeTools:
             for c in calls
         )
 
-
-class FakeClock:
-    def now(self) -> datetime:
-        return datetime(2026, 1, 1, tzinfo=UTC)

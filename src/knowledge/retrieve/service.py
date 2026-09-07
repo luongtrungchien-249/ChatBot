@@ -1,11 +1,11 @@
-"""Implement KnowledgePort. Duong tim day du, mot ham.
+"""Duong tim day du, mot ham.
 
     vector (top 20)  ─┐
                       ├─ RRF k=60 ─ top 10 ─ rerank ─ top 3-5 + nguong
     lexical (top 20) ─┘
 
 Tra ve RONG nghia la "khong tim thay trong tai lieu", KHONG phai loi — dung hop
-dong cua KnowledgePort. Do la cai cho phep bot noi thang thay vi lay kien thuc
+dong cua cong cu. Do la cai cho phep bot noi thang thay vi lay kien thuc
 chung ra thay the roi de nguoi dung tuong do la noi dung tai lieu cua ho.
 
 Cache embedding cau hoi: `emb:{sha256}` TTL 24h (section 6.5). Trong mot nhom,
@@ -14,7 +14,7 @@ cung mot cau hoi duoc go lai rat nhieu.
 
 import asyncio
 
-from agents.ports.knowledge import RetrievedChunk
+from agents.domain.knowledge import RetrievedChunk
 from config import get_settings
 from infra.logger import get_logger
 
@@ -29,7 +29,7 @@ FUSION_TOP = 10
 
 
 class HybridKnowledge:
-    """Implement KnowledgePort."""
+    """Kho tri thuc lai (hybrid)."""
 
     async def search(self, query: str, k: int) -> list[RetrievedChunk]:
         if not query.strip():

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from agents.ports.knowledge import RetrievedChunk
+from agents.domain.knowledge import RetrievedChunk
 from tools import knowledge_search
 from tools.knowledge_search import (
     KNOWLEDGE_SEARCH_DEFINITION,
