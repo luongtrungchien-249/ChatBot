@@ -51,6 +51,7 @@ build, khong can Node** — sua giao dien xong thi tai lai trang.
 | `uv run ruff check .` | Lint |
 | `uv run python -m main.cli ingest <tep>` | Nap tai lieu vao RAG (chi admin) |
 | `uv run python -m main.cli stats [ngay]` | Tien di dau, cham o dau, cache co an khong |
+| `uv run python -m main.cli review <nen-tang> <thread>` | Duyet SAU fact bot tu ghi (L3 implicit) |
 | `uv run pytest` | unit test (khong can I/O) |
 | `uv run lint-imports` | **Cuong che luat kien truc. Bat buoc trong CI.** |
 | `uv run python ops/guard_env.py` | **Chan doc env ngoai `config/`. Bat buoc trong CI.** |

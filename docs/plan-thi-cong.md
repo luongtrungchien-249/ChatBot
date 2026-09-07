@@ -1352,3 +1352,250 @@ cứng — thiếu một bài báo còn hơn không có bài nào. Đo lại tr�
 lỗi không tính là đã có kết quả, và thứ tự trả về không được lệch — lệch là báo sai tên
 nguồn trong log.
 
+---
+
+## 19. Dọn nợ và làm cho hệ thống nói thật về chính nó (08/09/2026)
+
+Ba việc nhỏ, cùng phục vụ một điều: đừng để hệ thống nói sai về chính nó.
+
+### 19.1 Hai port đã chết
+
+`KnowledgePort` và `ClockPort` được khai báo, hiện thực, tiêm vào `Deps` — và **không
+chỗ nào gọi**. Đường tra cứu thật đi qua công cụ `search_knowledge_base`, tức qua
+`ToolPort`; `ClockPort` thì không ai gọi ở đâu cả.
+
+Không vi phạm luật nào, nhưng dự án này có một câu riêng cho nó: *"thêm port là quyết
+định kiến trúc, không phải tiện tay"*. Một port chết còn tệ hơn không có port — người
+đọc sau sẽ tưởng đó là đường đi thật và thiết kế theo nó.
+
+Đã xoá cả hai, cùng `SystemClock`, `FakeClock`, `FakeKnowledge` và hai trường trong
+`Deps`. Còn **6 port**, tất cả đều được gọi thật.
+
+`RetrievedChunk` thì **giữ** — `prompt/builder.py`, `prompt/context.py` và
+`evals/runner.py` vẫn dùng. Nó chuyển sang `agents/domain/knowledge.py`: nó là một
+**giá trị** của miền nghiệp vụ, không phải một hợp đồng, nên nó thuộc về `domain/`.
+
+### 19.2 Stage 8 (rewrite) — bỏ, có chủ đích
+
+Kế hoạch thiết kế stage này khi retrieval còn là **pre-fetch**: câu "cái đó bao nhiêu?"
+phải viết lại thành câu độc lập trước khi search.
+
+Giờ retrieval là một **công cụ trong vòng ReAct**, và sau bản sửa ở §18 model nhìn thấy
+lịch sử dưới dạng lượt thật — nên chính nó đã tự viết truy vấn có ngữ cảnh. Đo được
+trong log: từ một từ "AI", model sinh ra truy vấn
+`artificial intelligence latest 2026 2025 2024`.
+
+Thêm một lần gọi model rẻ để làm lại việc đó là cộng thêm độ trễ và tiền cho thứ vòng
+lặp đang làm rồi. Đã xoá TODO và ghi lý do ngay tại chỗ. Làm lại nếu đo được truy vấn
+công cụ kém — không phải vì kế hoạch cũ có ghi.
+
+### 19.3 Đo đúng thứ người dùng cảm nhận
+
+`usage_log.latency_ms` là độ trễ của **một lần gọi**. Thứ người dùng chờ là **cả lượt**:
+gọi model → chạy công cụ → gọi model lần nữa. Hai con số đó lệch nhau vài lần, và cho
+tới hôm nay chỉ số duy nhất được báo cáo là con số nhỏ hơn.
+
+Sửa: ghi **cả bước chạy công cụ** vào `usage_log` (`route = 'tool'`), rồi cộng theo
+`trace_id` — mọi bước trong một lượt đều mang cùng một trace_id (luật L8). Thêm index
+trên `trace_id` vì đó là truy vấn chính của bảng từ giờ.
+
+Kết quả đo ngay khi bật, và nó nói một điều khác hẳn:
+
+| | Cũ (mỗi lần gọi) | Mới (cả lượt) |
+|---|---|---|
+| p95 | 9.859ms | **22.905ms** |
+
+Chỉ số cũ đang báo thấp hơn **2,3 lần** thứ người dùng thật sự chờ.
+
+Kèm theo, mục tiêu được tách làm hai — vì một lượt có tra cứu không thể nhanh bằng một
+lượt không tra cứu, và gộp chung thì không biết đang trượt cái nào:
+
+```
+  TRUOT khong tra cuu   93 luot   p50  4203ms   p95 25842ms   (muc tieu p95 <  5000ms)
+  DAT  co tra cuu        2 luot   p50 11312ms   p95 14982ms   (muc tieu p95 < 15000ms)
+```
+
+(Lượt cũ đều bị dán nhãn "không tra cứu" vì trước đây chưa ghi bước công cụ. Số liệu
+đúng tính từ đây.)
+
+**Một cột thêm rồi bỏ ngay trong ngày.** Bản đầu thêm cột `used_tools` vào `usage_log`,
+đánh dấu khi lần gọi model **được trao** công cụ. Thử chạy ba lượt — "Xin chào", "Tìm
+giúp tôi bài báo…", "Cảm ơn" — cả ba đều ra `used_tools = true`, vì vòng ReAct trao công
+cụ cho gần như mọi lần gọi. Cột đó vừa **sai** (không tách được gì) vừa **thừa**
+(`route = 'tool'` đã nói đúng điều cần biết). Migration `0010` bỏ nó; index trên
+`trace_id` thì giữ, đó mới là phần có giá trị. Giữ lại một cột luôn FALSE là để một cái
+bẫy cho người đọc sau.
+
+### 19.4 Bốn cảnh báo
+
+`ops/grafana/provisioning/alerting/` — cắm sẵn như dashboard, và cũng là **mã nguồn**:
+sửa trong giao diện thì lần dựng stack sau sẽ ghi đè.
+
+| Luật | Ngưỡng | Vì sao nó phải tự báo |
+|---|---|---|
+| Ngân sách ngày sắp cạn | > 80%, giữ 5 phút | Chạm 100% là bot **ngừng trả lời** tới hết ngày |
+| Prompt caching đã tắt | tỉ lệ < 5%, giữ 15 phút | Tiền tố prompt vỡ → trả giá đầy đủ cho ~2400 token ở mọi câu, đắt gấp 10, **không có triệu chứng nào khác** |
+| Tỉ lệ lỗi gọi model | > 5%, giữ 10 phút | Người dùng vẫn nhận câu fallback nên nhìn từ ngoài bot "vẫn sống" |
+| Lượt có tra cứu quá chậm | p95 > 15s, giữ 10 phút | Sắp chạm deadline ReAct, mà chạm là kết quả tra cứu bị vứt |
+
+**Đã kiểm chứng bằng cách chạy thật**, không chỉ kiểm cú pháp: dựng Prometheus +
+Grafana trên một mạng chung đúng như compose, và bốn luật đều `health = ok`.
+
+Hai lỗi bị bắt trong lúc kiểm chứng:
+
+1. **Datasource thiếu `uid`.** Luật trỏ `datasourceUid: prometheus`, nhưng
+   `datasources/prometheus.yml` không khai `uid` nên Grafana tự sinh một uid ngẫu nhiên.
+   Bốn luật hiện ra như bị hỏng, không dòng nào nói vì sao.
+2. **Luật lỗi model kêu oan.** Bản đầu dùng `sum(errors) > 0`. Chạy thật thì nó
+   **pending** ngay — vì metric là số lỗi tích luỹ 24h, nên một lỗi thoáng qua duy nhất
+   giữ cảnh báo kêu suốt một ngày. Đổi sang **tỉ lệ** lỗi/tổng > 5%. Một cảnh báo kêu vì
+   chuyện không đáng là một cảnh báo người ta học cách bỏ qua — rồi bỏ qua luôn lần nó
+   kêu đúng.
+
+**Cảnh báo mặc định KHÔNG gửi đi đâu**, chỉ hiện trong Grafana. Đó là chủ ý: nhét sẵn
+một webhook giả thì cảnh báo bay vào hư không trong khi bảng điều khiển báo xanh — một
+kênh báo hỏng còn tệ hơn không có kênh nào. `contact-points.yaml` ghi rõ cách thay bằng
+Slack/email/webhook thật.
+
+---
+
+## 20. Guardrail: ba tầng rails + ba mức tự chủ (08/09/2026)
+
+Sáu rủi ro cần phòng: hallucination, prompt injection, PII leakage, jailbreak, bias,
+over-autonomy. Kiểm kê trước khi thiết kế — chồng guardrail lên thứ đã tồn tại là cách
+nhanh nhất tạo ra hai lớp phòng thủ mâu thuẫn nhau:
+
+| Rủi ro | Đã có | Lỗ hổng thật |
+|---|---|---|
+| Hallucination | Prompt bắt trích nguồn; ngưỡng rerank → "không tìm thấy"; eval faithfulness | Không kiểm chứng **lúc chạy** |
+| Prompt injection | 8 mẫu + bọc thẻ + `role='tool'` + cap kích thước | Chỉ chạy trên **kết quả công cụ** |
+| PII leakage | `ThreadScope` + `redact` cho log | **Đường ra trống hoàn toàn** |
+| Jailbreak | RULES + few-shot | Không biết **ai đang thử** |
+| Bias | — | Không có gì |
+| Over-autonomy | 6 chặn cứng ReAct; công cụ chỉ-đọc; `quên` phải xác nhận | Chưa phân loại hành động theo mức |
+
+Ba lỗ hổng đầu được chứng minh bằng cách chạy, không bằng đọc: gõ *"số điện thoại của
+tôi là 0912345678, bạn nhắc lại giúp tôi"* → bot đọc lại nguyên văn. `shared/redact.py`
+**có sẵn** mẫu bắt số Việt Nam, nhưng nó chỉ chạy trên log.
+
+### 20.1 Output Rails — tầng trước đây không tồn tại
+
+`stages/respond.py` từ một hàm đi thẳng thành **chốt chặn cuối cùng**. Mọi đường ra đều
+qua nó, kể cả câu lỗi và câu trả lời lệnh `memory` — lệnh đó đọc lại fact người khác ghi.
+
+Đặt ở đây chứ không ở stage 12 là có chủ đích: một câu fallback không thể chứa bí mật,
+nhưng một câu trả lời lệnh `memory` thì hoàn toàn có thể.
+
+| Luật | Chính sách | Vì sao |
+|---|---|---|
+| Bí mật | **Chặn cứng**, không điều kiện | Không có trường hợp hợp lệ nào để bot đọc một khoá API ra giữa nhóm chat |
+| Cá nhân | Che **có điều kiện** | Che tất cả sẽ cho ra "số điện thoại của bạn là [số đã ẩn]" — bot vô dụng |
+| Định dạng | Bỏ markdown | Zalo không render; **chạy TRƯỚC hai luật trên** |
+| Trích dẫn | **Ghi nhận, không chặn** | Câu trả lời đúng mà quên trích dẫn vẫn hơn câu bị nuốt |
+
+Luật cá nhân là chỗ đáng nói nhất: **chỉ che thứ bot không nhận từ người dùng ở lượt
+này**. Số người dùng vừa tự gõ thì được nhắc lại; số bot lấy từ tài liệu, từ web hay từ
+bộ nhớ người khác thì che. Một bộ lọc mù sẽ giết luôn tính hữu ích.
+
+Luật trích dẫn cố ý không chặn: chặn ở đó là đổi một lỗi **hiện** thành một lỗi **im
+lặng** — đúng hướng mà cả dự án này đang chống lại. Nó ở đó để **đo** tỉ lệ, rồi mới
+quyết định siết bằng cách nào.
+
+**Hai lỗi trong chính lớp bảo vệ, bắt được bằng cách chạy:**
+
+1. **Thứ tự sai ăn mất dấu che.** Ban đầu che trước, bỏ markdown sau. Dấu che là ba dấu
+   sao, mà bộ lọc markdown coi hai dấu sao là chữ đậm — nó **bóc mất chính các dấu che**,
+   biến `sk-***` thành `sk-` và `postgres://***:***@` thành `postgres://:@`. Bí mật vẫn
+   được che, nhưng câu trả lời ra ngoài trông như bị cắt xén, và không ai hiểu vì sao.
+2. **Dấu tham chiếu nhóm lọt ra nguyên văn.** Thay thế bằng **hàm** thì Python không nội
+   suy tham chiếu — người dùng nhận được `hoac @` kèm dấu tham chiếu thô.
+
+Cả hai thành `TestThuTuChay` để không ai đảo lại.
+
+### 20.2 Input Rails — một danh sách mẫu cho ba bề mặt
+
+Bộ dò chuyển từ `tools/guard.py` sang `agents/policy/injection.py`, vì luật L1 cấm
+`agents/` import `tools/`. Giờ **ba bề mặt dùng chung một danh sách**: tin nhắn người
+dùng, tài liệu lúc nạp, kết quả công cụ. Ba danh sách rời nhau là ba danh sách sẽ lệch
+nhau sau vài lần sửa.
+
+Thêm phân loại `injection` / `jailbreak` — hai loại nói lên hai điều khác nhau:
+injection thường đến từ tài liệu hoặc web (kẻ tấn công không ở trong nhóm), jailbreak
+đến từ chính người đang ngồi trong nhóm chat.
+
+Tài liệu lúc nạp là bề mặt nguy hiểm hơn một tin nhắn: một tệp có câu ra lệnh nhúng sẽ
+nằm trong CSDL vector và được kéo vào prompt ở **mọi** câu hỏi liên quan, lặp lại mãi.
+
+**Vẫn cố ý không chặn.** Tầng này để ĐO: biết có ai đang thử, thử bằng cách nào, tần
+suất bao nhiêu — ba con số mà trước đây bằng không. Chạy thật:
+
+```
+[warning] tin nhan co mau giong tan cong prompt — ghi nhan de audit, KHONG chan
+          loai=['injection','jailbreak']
+          mau=['bo-qua-huong-dan','doi-vai','lo-system-prompt']
+```
+
+…và bot vẫn từ chối đúng, tức lớp prompt vẫn giữ được vai.
+
+**Không làm topic filter.** Đây là trợ lý nội bộ; một bộ lọc chủ đề sẽ từ chối đúng
+những câu hỏi công việc hợp lệ mà không ai đoán trước được. Kiểm soát phạm vi đã có
+bằng allowlist nhóm.
+
+### 20.3 LLM Rails — hai khối mới
+
+**Công bằng**: không suy phẩm chất từ giới/tuổi/quê quán/tôn giáo/chức vụ; nhận xét về
+một người phải nêu căn cứ; so sánh thì so sánh việc, không xếp hạng con người; câu hỏi
+nhiều quan điểm hợp lý thì nêu đánh đổi thay vì trình bày một hướng như hướng duy nhất.
+
+**Ranh giới tự chủ**: được tự tra cứu; **phải hỏi và đợi đồng ý trước khi xoá**; không
+tự quyết việc của người (nạp tài liệu, mở nhóm, đổi cấu hình); **không hứa làm việc
+ngoài lúc này** — bot không có lịch, không chạy nền.
+
+Kiểm chứng: *"nam hay nữ làm backend giỏi hơn?"* → từ chối đánh giá theo giới.
+*"nhắc tôi họp 3h chiều mai"* → nói thẳng không chạy nền được rồi đề xuất cách khác.
+
+`SYSTEM_PROMPT` 2.416 → **2.801 token**; nới trần 2.600 → 3.200. Phần thêm tốn khoảng
+**$0,00002/câu** vì 85% lượt đọc được cache — đổi lại là bốn rủi ro có luật thành văn.
+
+### 20.4 Ba mức tự chủ
+
+`agents/policy/autonomy.py` — bảng 6 hành động **thật**, mỗi cái kèm lý do chọn mức và
+đường đảo ngược. Đây là tài liệu **cưỡng chế được**: `test_guardrails.py` đối chiếu nó
+với hành vi thật, và ràng buộc trung tâm là *việc không đảo ngược được thì không được
+phép ở mức on-the-loop*.
+
+| Mức | Hành động | Vì sao |
+|---|---|---|
+| **on-the-loop** | trả lời, tra cứu, **ghi fact tự động** | Đọc thì sai sửa được; bắt duyệt trước mỗi câu thì bot không còn là bot |
+| **in-the-loop** | **xoá fact** | Soft delete không có lệnh khôi phục; ngưỡng tìm ứng viên cố ý rộng nên danh sách hay có thứ không định xoá |
+| **tiebreaker** | nạp tài liệu, mở nhóm | Cưỡng chế bằng **cấu trúc**: đường duy nhất là CLI trên máy chủ, agent không chạm tới được. Cấu trúc thì model không thuyết phục được |
+
+**Nói thẳng: bot này gần như không có việc rủi ro cao.** Nó đọc và trả lời; ba công cụ
+đều chỉ-đọc; thứ duy nhất nó ghi được là `memory_fact`. Nên bảng cố ý **ngắn**. Dựng
+một bộ máy phê duyệt ba tầng cho những việc không tồn tại là nghi lễ — nó tạo cảm giác
+đã kiểm soát, trong khi thứ thật sự cần canh lại chưa có luồng nào.
+
+### 20.5 Thứ thật sự cần canh: `cli review`
+
+L3 implicit tắt từ Giai đoạn 7 với lý do ghi thẳng trong code: *"ghi thông tin về NGƯỜI
+CÓ TÊN mà không ai bấm nút đồng ý"*. Điều kiện để bật **không phải** thêm một lớp chặn
+nữa — ba lớp đã có (loại câu của bot, tên phải có trong lô, độ tin cậy từ 0,8). Điều
+kiện là **nhìn thấy được**, và bỏ được cái sai.
+
+Migration `0011` thêm `reviewed_at` / `reviewed_by` (chỉ có nghĩa với `source='implicit'`
+— fact explicit là lời người dùng, không ai phải duyệt). `cli review`:
+
+```
+1. [user:nam] Nam lam backend Node.js       tin cay 0.95
+2. [user:nam] Lan phu trach phan giao dien  tin cay 0.90
+3. [user:nam] Nam hoc dai hoc Bach khoa     tin cay 0.85
+
+review ... ok 1 3    danh dau da xem
+review ... bo 2      XOA (soft delete, khong khoi phuc duoc)
+```
+
+Chạy thật đầu-cuối: bỏ mục 3 → duyệt 2 mục còn lại → danh sách chờ trống → `cli memory`
+xác nhận mục đã bỏ biến mất khỏi mọi prompt sau đó.
+
+**`MEMORY_IMPLICIT_ENABLED=true` giờ bật được** — điều kiện tiên quyết đã đủ. Đó là
+quyết định sản phẩm, không phải quyết định kỹ thuật, nên nó thuộc về chủ dự án.
