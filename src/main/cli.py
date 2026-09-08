@@ -24,6 +24,7 @@ from infra.logger import configure_logging, get_logger
 from infra.metrics import budget_today, cache_stats, message_stats, route_stats, turn_stats
 from infra.redis_client import close_redis
 from knowledge.ingest.extract import SUPPORTED, UnsupportedDocumentError
+from knowledge.ingest.kiem_tra import in_bao_cao, kiem_tra
 from knowledge.ingest.pipeline import ingest_file
 from memory.repository.fact_repo import cho_duyet, danh_dau_da_duyet, dump_thread, revoke
 
@@ -186,14 +187,22 @@ async def memory_dump(args: list[str]) -> int:
 
 
 async def ingest_command(args: list[str]) -> int:
-    """`ingest <duong-dan> [ten hien thi]` — nap tai lieu vao knowledge base.
+    """`ingest [--kiem-tra] <duong-dan> [ten hien thi]` — nap tai lieu vao knowledge base.
 
     CHI ADMIN. Cuong che bang chinh cho dat lenh nay: khong co route HTTP nao goi
     toi ingest_file(), nen ai chay duoc lenh tren may chu thi moi nap duoc.
     Moi lan nap ghi lai nguoi nap vao kb_document.ingested_by (master-plan 3.4).
+
+    `--kiem-tra` chay KHO: trich xuat, lam sach, cat chunk roi in bao cao chat luong
+    ma KHONG ghi mot dong nao vao CSDL va khong goi mot API nao. Chay no TRUOC khi nap
+    that — luc do con sua duoc mien phi; sau khi nap roi thi moi thay doi ve cach lam
+    sach hay cach cat deu keo theo mot lan nap lai.
     """
+    chi_kiem_tra = "--kiem-tra" in args
+    args = [a for a in args if a != "--kiem-tra"]
+
     if not args:
-        print("Dung: ingest <duong-dan> [ten hien thi]", file=sys.stderr)
+        print("Dung: ingest [--kiem-tra] <duong-dan> [ten hien thi]", file=sys.stderr)
         print(f"Duoi ho tro: {', '.join(SUPPORTED)}", file=sys.stderr)
         return 1
 
@@ -201,6 +210,17 @@ async def ingest_command(args: list[str]) -> int:
     if not path.is_file():
         print(f"Khong thay tep: {path}", file=sys.stderr)
         return 1
+
+    if chi_kiem_tra:
+        # Chay KHO: khong cham CSDL, khong goi API nao. Ket qua la mot bao cao de
+        # doc bang mat, cong voi ma thoat de dung duoc trong script.
+        try:
+            bao_cao, _ = kiem_tra(path)
+        except (UnsupportedDocumentError, ValueError) as error:
+            print(f"Khong doc duoc: {error}", file=sys.stderr)
+            return 1
+        in_bao_cao(bao_cao)
+        return 0 if bao_cao.dat else 1
 
     title = " ".join(args[1:]) or None
     # Ten nguoi nap: ghi lai ai da dua tai lieu nao vao. Khong co he thong tai khoan

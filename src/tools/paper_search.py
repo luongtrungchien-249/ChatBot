@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from agents.ports.llm import CallContext
 from agents.ports.logger import LoggerPort
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
@@ -337,7 +338,7 @@ async def _fan_out(
 
 
 async def run_paper_search(
-    payload: dict[str, Any], trace_id: str, logger: LoggerPort | None = None
+    payload: dict[str, Any], ctx: CallContext, logger: LoggerPort | None = None
 ) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip():
@@ -359,7 +360,7 @@ async def run_paper_search(
             _from_crossref(client, query, per_source),
         ),
         names,
-        trace_id,
+        ctx.trace_id,
         logger,
     )
 
@@ -371,7 +372,7 @@ async def run_paper_search(
             if logger is not None:
                 logger.warning(
                     "mot nguon paper_search that bai — van tra ve phan con lai",
-                    trace_id=trace_id,
+                    trace_id=ctx.trace_id,
                     source=name,
                     err=str(outcome)[:200],
                 )

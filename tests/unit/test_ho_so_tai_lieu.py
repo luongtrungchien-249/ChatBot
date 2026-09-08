@@ -18,6 +18,7 @@ from knowledge.ingest.chunk import chunk_document
 from knowledge.ingest.profiles import (
     COOKBOOK_SLASHDOT,
     HO_SO,
+    TIEU_DE_VIET_HOA,
     HoSo,
     ap_sua_ky_tu,
     nhan_dien,
@@ -60,6 +61,50 @@ class TestNhanDien:
         """
         for h in HO_SO:
             assert h.moc.groups >= 1, h.ten
+
+
+class TestUuTien:
+    """Ho so CHUYEN BIET phai thang ho so TONG QUAT, bat ke so lan khop.
+
+    Bug that: them ho so `tieu_de_viet_hoa` (tong quat) vao danh sach thi no cuop
+    luon cookbook Slashdot — 222 lan khop so voi 59 cua ho so chuyen biet. Luat
+    "khop nhieu nhat thang" lam moi ho so hep tro nen vo dung ngay khi co mot ho so
+    tong quat, va trieu chung la ket qua chunk tut lai chu khong phai mot loi nao.
+    """
+
+    async def test_ho_so_hep_thang_du_khop_IT_hon(self) -> None:
+        hep = HoSo(ten="hep", moc=re.compile(r"(MOC-HEP)"), toi_thieu=2, do_uu_tien=10)
+        rong = HoSo(ten="rong", moc=re.compile(r"(TU)"), toi_thieu=2, do_uu_tien=0)
+        van_ban = "MOC-HEP " * 3 + "TU " * 50
+
+        assert rong.so_lan_khop(van_ban) > hep.so_lan_khop(van_ban)
+
+        import knowledge.ingest.profiles as mod
+
+        goc = mod.HO_SO
+        try:
+            mod.HO_SO = (rong, hep)
+            assert mod.nhan_dien(van_ban) is hep
+        finally:
+            mod.HO_SO = goc
+
+    async def test_cookbook_van_thuoc_ho_so_chuyen_biet_cua_no(self) -> None:
+        assert nhan_dien(SACH) is COOKBOOK_SLASHDOT
+
+    async def test_tieu_de_viet_hoa_bat_duoc_ca_TIENG_VIET(self) -> None:
+        """Dai Unicode `a-y` co dau BAO TRUM ca chu HOA tieng Viet, nen mot mau viet
+        bang dai do se loai sach ten mon tieng Viet — mat dung thu quan trong nhat,
+        vi `section` di vao `embed_input` roi vao `tsv`.
+        """
+        van_ban = "\n" + "\n".join(
+            f"GÀ HẦM BÍ ĐỎ {i}\nthan bai viet thuong." for i in range(12)
+        )
+
+        assert TIEU_DE_VIET_HOA.so_lan_khop(van_ban) >= 10
+
+    async def test_tieu_de_viet_hoa_KHONG_bat_dong_thuong(self) -> None:
+        """Ca am: than bai viet thuong khong duoc thanh tieu de."""
+        assert TIEU_DE_VIET_HOA.so_lan_khop("\nmot dong binh thuong\nmot dong nua\n") == 0
 
 
 class TestSuaKyTu:

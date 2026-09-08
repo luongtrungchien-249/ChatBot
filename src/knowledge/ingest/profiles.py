@@ -21,6 +21,7 @@ Hai luat giu cho no khong thanh cho chua rac:
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 
@@ -38,6 +39,14 @@ class HoSo:
     #: Duoi nguong nay coi nhu khong khop. Xem luat 1 o docstring.
     toi_thieu: int = 5
 
+    #: Do CHUYEN BIET. Cao hon thang, bat ke so lan khop.
+    #:
+    #: Khong dung "khop nhieu nhat thang": mot mau TONG QUAT luon dong hon mot mau
+    #: HEP tren cung mot tai lieu. Do that — tren cookbook Slashdot, mau tieu de viet
+    #: hoa khop 222 lan con mau tagline chuyen biet chi 59, nen luat "nhieu nhat
+    #: thang" cuop tai lieu khoi dung ho so cua no va keo ket qua tut lai.
+    do_uu_tien: int = 0
+
     def so_lan_khop(self, text: str) -> int:
         return len(self.moc.findall(text))
 
@@ -53,7 +62,18 @@ class HoSo:
 # Do duoc tren The_Open_Source_Cookbook_v0.4.pdf: 60 lan, rat deu. Cat theo moc nay
 # cho ra 1,00 mon/chunk — khong chunk nao lan sang mon khac.
 
-_MOC_COOKBOOK = re.compile(r"\n([^\n]{3,80})\nfrom the [^\n]{2,60} dept\.")
+# `[ \n]` chu khong phai `\n`: buoc lam sach (clean.py) noi dong bi PDF ngat giua cau,
+# va "from" la chu THUONG nen dong tagline bi noi vao dong ten mon:
+#
+#     truoc lam sach:  "Kristin's Poor Man's Goulash\nfrom the el-cheapo dept."
+#     sau lam sach:    "Kristin's Poor Man's Goulash from the el-cheapo dept."
+#
+# Mau chi nhan dang co xuong dong se khop 0/60 sau khi lam sach — da xay ra that, va
+# trieu chung la `section` tut ve NULL toan bo chu khong phai mot loi nao. Nhan ca hai
+# dang de mau khong phu thuoc vao viec buoc truoc no lam gi.
+#
+# `{3,80}?` khong tham: can dung lai o " from the" gan nhat, khong nuot qua no.
+_MOC_COOKBOOK = re.compile(r"\n([^\n]{3,80}?)[ \n]from the [^\n]{2,60} dept\.")
 
 # Bang phan so.
 #
@@ -75,20 +95,73 @@ COOKBOOK_SLASHDOT = HoSo(
     ten="cookbook_slashdot",
     moc=_MOC_COOKBOOK,
     sua_ky_tu=_PHAN_SO,
+    #: Chuyen biet: mau tagline "from the ... dept." gan nhu khong the trung hop.
+    do_uu_tien=10,
+)
+
+# --------------------------------------------------------------------------------
+# Ho so 2: tai lieu dung dong VIET HOA lam tieu de
+# --------------------------------------------------------------------------------
+# Dang rat pho bien trong sach/booklet duoc thiet ke: ten muc va ten mon in hoa toan
+# bo, than bai viet thuong. Do tren booklet Sa Pa (song ngu Viet-Anh, 46 trang):
+# 108 moc, trong do 61 co dau tieng Viet.
+#
+# VI SAO KHONG DUNG DAI `A-Z` HAY `À-Ỹ`:
+#
+# Dai Unicode `à-ỹ` (U+00E0..U+1EF9) BAO TRUM ca chu HOA tieng Viet — `Ạ` la U+1EA0,
+# nam gon trong do. Viet `[^a-zà-ỹ]` de nghia "khong co chu thuong" se loai luon
+# `GÀ HẦM BÍ ĐỎ`. Da gap that: ban dau chi bat duoc 59 moc va toan tieng Anh, tuc mat
+# sach ten mon tieng Viet — dung thu quan trong nhat, vi `section` di vao `embed_input`
+# roi vao `tsv`, tuc no la duong duy nhat de BM25 khop duoc cau hoi tieng Viet.
+#
+# Nen dung sinh tap chu thuong bang unicodedata thay vi go tay mot dai.
+_CHU_THUONG = "".join(
+    chr(c)
+    for c in range(0x61, 0x1F00)
+    if chr(c).islower() and "LATIN" in unicodedata.name(chr(c), "")
+)
+_KHONG_THUONG = "[^" + chr(10) + "a-z" + _CHU_THUONG + "]"
+
+#: Mot dong: khong co chu thuong nao, co it nhat mot chu cai, dai 4-60.
+#: `(?=\n)` chu khong `\n`: khong nuot ky tu xuong dong, de hai tieu de lien nhau
+#: (ban tieng Viet va ban tieng Anh cua cung mot mon) deu duoc nhan ra.
+_MOC_VIET_HOA = re.compile(
+    r"\n[ \t]*((?=[^\n]*[^\W\d_])" + _KHONG_THUONG + r"{4,60}?)[ \t]*(?=\n)"
+)
+
+TIEU_DE_VIET_HOA = HoSo(
+    ten="tieu_de_viet_hoa",
+    moc=_MOC_VIET_HOA,
+    #: Nguong cao hon mac dinh: mot dong viet hoa le (vi du "OK" hay "LUU Y") xuat
+    #: hien vai lan trong tai lieu binh thuong la chuyen thuong. Doi hoi 10 lan de
+    #: chac day la mot QUY UOC trinh bay chu khong phai trung hop.
+    toi_thieu=10,
+    #: TONG QUAT — de o muc 0. Bat cu ho so hep nao cung phai thang no.
+    do_uu_tien=0,
 )
 
 #: Danh sach ho so. Them mot dang tai lieu = them mot dong o day.
-HO_SO: tuple[HoSo, ...] = (COOKBOOK_SLASHDOT,)
+#:
+#: Thu tu trong tuple KHONG quan trong — `do_uu_tien` moi quyet dinh.
+HO_SO: tuple[HoSo, ...] = (COOKBOOK_SLASHDOT, TIEU_DE_VIET_HOA)
 
 
 def nhan_dien(text: str) -> HoSo | None:
-    """Ho so khop NHIEU nhat, va phai dat nguong. Khong khop -> None."""
-    tot_nhat: tuple[int, HoSo] | None = None
+    """Ho so CHUYEN BIET nhat trong so cac ho so dat nguong. Khong co -> None.
+
+    Uu tien truoc, so lan khop chi de pha hoa. Ly do o `HoSo.do_uu_tien`: mau tong
+    quat luon dong hon mau hep, nen xep hang theo so lan khop se lam moi ho so hep
+    tro nen vo dung ngay khi them mot ho so tong quat vao danh sach.
+    """
+    tot_nhat: tuple[int, int, HoSo] | None = None
     for ho_so in HO_SO:
         n = ho_so.so_lan_khop(text)
-        if n >= ho_so.toi_thieu and (tot_nhat is None or n > tot_nhat[0]):
-            tot_nhat = (n, ho_so)
-    return tot_nhat[1] if tot_nhat else None
+        if n < ho_so.toi_thieu:
+            continue
+        khoa = (ho_so.do_uu_tien, n)
+        if tot_nhat is None or khoa > (tot_nhat[0], tot_nhat[1]):
+            tot_nhat = (ho_so.do_uu_tien, n, ho_so)
+    return tot_nhat[2] if tot_nhat else None
 
 
 # --------------------------------------------------------------------------------

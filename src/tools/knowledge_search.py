@@ -11,6 +11,7 @@ bia ra noi dung tai lieu.
 
 from typing import Any
 
+from agents.ports.llm import CallContext
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from infra.db import fetch
 from infra.logger import get_logger
@@ -23,10 +24,15 @@ _DEFAULT_K = 5
 KNOWLEDGE_SEARCH_DEFINITION = ToolDefinition(
     name="search_knowledge_base",
     description=(
-        "Tra cứu tài liệu nội bộ của tổ chức: quy định, quy trình, chính sách, sổ tay, "
-        "hướng dẫn. Dùng công cụ này TRƯỚC khi trả lời bất cứ câu hỏi nào về cách tổ chức "
-        "này làm việc. KHÔNG dùng cho tin tức, giá cả hay sự kiện bên ngoài — dùng "
-        "web_search cho việc đó."
+        "Tra cứu kho tài liệu mà tổ chức này đã nạp vào hệ thống. Kho có thể chứa BẤT KỲ "
+        "loại tài liệu nào họ quan tâm: quy định, quy trình, chính sách, sổ tay, cẩm nang "
+        "chuyên môn, sách công thức nấu ăn, hướng dẫn kỹ thuật. "
+        "BẠN KHÔNG BIẾT TRONG KHO CÓ GÌ CHO TỚI KHI TRA. "
+        "Vì vậy hãy gọi công cụ này TRƯỚC khi trả lời bất cứ câu hỏi có dữ kiện nào — kể cả "
+        "câu bạn nghĩ mình đã biết đáp án. Trả lời từ trí nhớ trong khi tài liệu của họ có "
+        "sẵn câu trả lời là bỏ phí đúng thứ họ đã nạp vào, và câu của bạn sẽ không có nguồn. "
+        "Không tìm thấy thì công cụ sẽ nói rõ bước tiếp theo. "
+        "Riêng tin tức, giá cả, sự kiện đang diễn ra thì dùng thẳng web_search."
     ),
     parameters={
         "type": "object",
@@ -81,22 +87,41 @@ def is_knowledge_search_available() -> bool:
     return _has_documents
 
 
-async def run_knowledge_search(payload: dict[str, Any], _trace_id: str) -> str:
+async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip():
         raise ValueError("search_knowledge_base can tham so query")
 
     from knowledge.retrieve.service import knowledge
 
-    chunks = await knowledge.search(query, _DEFAULT_K)
+    # PHAM VI di cung cau hoi, y het hop dong cua memory_fact: mot nhom chi doc
+    # duoc tai lieu 'chung' va tai lieu cua chinh no. Truoc day khong co tham so
+    # nay — moi nhom doc duoc toan bo moi tai lieu.
+    chunks = await knowledge.search(ctx.scope, query, _DEFAULT_K)
     if not chunks:
-        # Cau nay di thang vao prompt, nen no phai noi dung mot dieu: da tim va
-        # KHONG co. Model duoc day (RULES + Vi du 1) la noi thang thay vi lay kien
-        # thuc chung ra thay the.
+        # Cau nay di thang vao prompt, va no la don bay manh nhat cua ca luong: no
+        # den DUNG khoanh khac model vua thay ket qua rong.
+        #
+        # Phan nhanh theo LOAI CAU HOI chu khong theo "co tim thay hay khong", vi hai
+        # loai co hai cai gia rat khac nhau:
+        #
+        #   - Cau hoi noi bo ("chinh sach nghi phep nam"): web tra ve luat lao dong
+        #     chung — hop ly, co nguon, va SAI voi to chuc nay. Nguoi dung se hanh
+        #     dong theo. Te hon han viec khong tra loi.
+        #   - Cau hoi kien thuc chung ("cach lam bun cha"): web dung la cho de tra.
+        #
+        # Cong cu khong biet cau hoi thuoc loai nao — model thi biet, vi no doc ca
+        # doan hoi thoai. Nen o day noi ca hai duong kem LY DO, khong chi ra lenh.
         return (
-            "Không tìm thấy đoạn tài liệu nội bộ nào liên quan tới câu hỏi này. "
-            "Hãy nói thẳng với người dùng là tài liệu hiện có không đề cập, "
-            "đừng thay bằng kiến thức chung."
+            "Không tìm thấy đoạn tài liệu nội bộ nào liên quan tới câu hỏi này.\n\n"
+            "- Nếu đây là câu hỏi về QUY ĐỊNH / QUY TRÌNH / CHÍNH SÁCH của tổ chức: "
+            "nói thẳng là tài liệu hiện có không đề cập và gợi ý hỏi bộ phận phụ trách. "
+            "ĐỪNG tra web — web không biết quy định riêng của tổ chức này, và một câu "
+            "trả lời chung chung sẽ bị hiểu nhầm thành quy định thật.\n"
+            "- Nếu đây là câu hỏi KIẾN THỨC CHUNG (món ăn, cách nấu, thông tin đời "
+            "sống, sự kiện bên ngoài): gọi web_search ngay trong lượt này, và khi trả "
+            "lời phải nói rõ thông tin lấy từ web chứ không phải từ tài liệu nội bộ.\n\n"
+            "Cả hai trường hợp: đừng lấy trí nhớ của bạn ra thay thế."
         )
 
     return "\n\n".join(

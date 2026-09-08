@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from agents.domain.thread import ThreadScope
 from config import get_settings
 from knowledge.retrieve.fusion import reciprocal_rank_fusion
 from knowledge.retrieve.search import CANDIDATES_PER_SIDE, lexical_search, vector_search
@@ -34,6 +35,9 @@ from knowledge.retrieve.service import FUSION_TOP
 from llm.reranker import get_reranker
 
 TOP_K = 5
+
+#: Do tren pham vi "chung" — dung pham vi ma moi nhom deu doc duoc.
+_SCOPE = ThreadScope(platform="cli", thread_id="benchmark")
 
 
 async def ung_vien(question: str) -> list[tuple[int, str]]:
@@ -43,8 +47,8 @@ async def ung_vien(question: str) -> list[tuple[int, str]]:
     mot tap ung vien khac voi tap that la do sai thu.
     """
     vector_hits, lexical_hits = await asyncio.gather(
-        vector_search(question, CANDIDATES_PER_SIDE),
-        lexical_search(question, CANDIDATES_PER_SIDE),
+        vector_search(_SCOPE, question, CANDIDATES_PER_SIDE),
+        lexical_search(_SCOPE, question, CANDIDATES_PER_SIDE),
         return_exceptions=True,
     )
     rows: dict[int, str] = {}
@@ -124,6 +128,8 @@ async def main() -> int:
     if khong_co_ung_vien:
         print(f"  {khong_co_ung_vien} cau khong co ung vien nao")
 
+    _quet_nguong(diem_dung, diem_sai)
+
     print()
     if dung_min > sai_max:
         de_xuat = (dung_min + sai_max) / 2
@@ -134,6 +140,30 @@ async def main() -> int:
         print("  KHONG co nguong nao tach duoc chunk dung khoi chunk sai.")
         print("  Doi nha cung cap rerank, hoac xem lai cach cat chunk truoc.")
     return 0
+
+
+def _quet_nguong(diem_dung: list[float], diem_sai: list[float]) -> None:
+    """Bang danh doi, cho truong hop hai phan bo CHONG NHAU.
+
+    Khi chung tach roi thi chon nguong la viec de — lay diem giua. Khi chung chong
+    nhau thi khong co dap an dung, chi co danh doi, va nguoi chon phai NHIN THAY no:
+
+      giu duoc  = ti le chunk DUNG vuot nguong  -> mat cai nay la bo sot tai lieu that
+      chan duoc = ti le chunk SAI bi loai       -> mat cai nay la dua rac vao prompt
+
+    Khong tu chon ho: hai huong sai co gia khac nhau tuy viec, va do la quyet dinh
+    cua chu du an chu khong phai cua mot cong thuc.
+    """
+    print()
+    print("  Quet nguong (khi hai phan bo chong nhau, khong co dap an dung — chi co danh doi):")
+    print()
+    print(f"    {'nguong':>8}  {'giu duoc chunk DUNG':>21}  {'chan duoc chunk SAI':>21}")
+    for nguong in (0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75):
+        giu = sum(1 for d in diem_dung if d >= nguong) / len(diem_dung)
+        chan = (
+            sum(1 for d in diem_sai if d < nguong) / len(diem_sai) if diem_sai else 1.0
+        )
+        print(f"    {nguong:>8.2f}  {giu:>20.1%}  {chan:>20.1%}")
 
 
 if __name__ == "__main__":

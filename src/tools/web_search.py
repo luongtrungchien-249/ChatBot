@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from agents.ports.llm import CallContext
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
 from infra.http import get_http
@@ -60,7 +61,7 @@ def is_web_search_available() -> bool:
     return get_settings().TAVILY_API_KEY != ""
 
 
-async def run_web_search(payload: dict[str, Any], _trace_id: str) -> str:
+async def run_web_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip():
         raise ValueError("web_search can tham so query")

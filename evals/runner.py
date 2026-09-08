@@ -116,7 +116,7 @@ async def run_one(row: Row) -> Outcome:
     ctx = CallContext(scope=scope, sender_id="eval", trace_id=trace_id)
 
     started = time.monotonic()
-    chunks = await knowledge.search(row.question, K)
+    chunks = await knowledge.search(scope, row.question, K)
     envelope = build_context(
         ContextInput(question=row.question, is_group=False, chunks=tuple(chunks)), _log
     )
