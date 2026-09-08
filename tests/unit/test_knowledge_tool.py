@@ -8,11 +8,19 @@ from typing import Any
 import pytest
 
 from agents.domain.knowledge import RetrievedChunk
+from agents.domain.thread import ThreadScope
+from agents.ports.llm import CallContext
 from tools import knowledge_search
 from tools.knowledge_search import (
     KNOWLEDGE_SEARCH_DEFINITION,
     is_knowledge_search_available,
     run_knowledge_search,
+)
+
+
+#: Pham vi di cung moi lan goi cong cu, y het hop dong cua memory_fact.
+CTX = CallContext(
+    scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr"
 )
 
 
@@ -33,7 +41,9 @@ def kho(monkeypatch: pytest.MonkeyPatch) -> list[RetrievedChunk]:
     ket_qua: list[RetrievedChunk] = []
 
     class KhoGia:
-        async def search(self, query: str, k: int) -> list[RetrievedChunk]:
+        async def search(
+            self, scope: ThreadScope, query: str, k: int
+        ) -> list[RetrievedChunk]:
             return ket_qua
 
     import knowledge.retrieve.service as service
@@ -62,11 +72,37 @@ class TestKhaiBao:
         assert KNOWLEDGE_SEARCH_DEFINITION.parameters["additionalProperties"] is False
 
 
+class TestMoTaNoiDungKho:
+    """Mo ta cong cu la CODE, khong phai chu thich — model doc no de quyet dinh.
+
+    Ban dau mo ta viet kho la "tai lieu noi bo cua to chuc: quy dinh, quy trinh,
+    chinh sach" va bao dung "TRUOC khi tra loi cau hoi ve cach to chuc nay lam viec".
+    Do duoc tren bot that: hoi "Ga ham bi do can nguyen lieu gi" — mot mon CO trong
+    kho — model KHONG goi cong cu nay lan nao, vi cau hoi khong giong "cach to chuc
+    lam viec". No tra loi tu tri nho, khong nguon.
+
+    Sau khi mo ta noi ro kho co the chua BAT KY loai tai lieu nao va model khong biet
+    trong do co gi cho toi khi tra: 6/6 nhom do deu dat.
+    """
+
+    async def test_khong_bo_hep_kho_vao_moi_tai_lieu_quan_tri(self) -> None:
+        mo_ta = KNOWLEDGE_SEARCH_DEFINITION.description
+        assert "BẤT KỲ" in mo_ta
+
+    async def test_noi_ro_model_KHONG_BIET_trong_kho_co_gi(self) -> None:
+        assert "KHÔNG BIẾT TRONG KHO CÓ GÌ" in KNOWLEDGE_SEARCH_DEFINITION.description
+
+    async def test_bat_tra_TRUOC_khi_tra_loi_tu_tri_nho(self) -> None:
+        mo_ta = KNOWLEDGE_SEARCH_DEFINITION.description
+        assert "TRƯỚC" in mo_ta
+        assert "trí nhớ" in mo_ta
+
+
 class TestKetQua:
     async def test_kem_nguon_va_muc_de_trich_dan(self, kho: list[RetrievedChunk]) -> None:
         kho.append(chunk("Don hoan tien xu ly trong 7 ngay lam viec."))
 
-        out = await run_knowledge_search({"query": "hoan tien"}, "tr")
+        out = await run_knowledge_search({"query": "hoan tien"}, CTX)
 
         assert "So tay nhan vien 2026" in out
         assert "Chinh sach hoan tien" in out
@@ -74,24 +110,47 @@ class TestKetQua:
 
     async def test_khong_co_muc_thi_van_chay(self, kho: list[RetrievedChunk]) -> None:
         kho.append(chunk("Noi dung.", section=None))
-        assert "So tay nhan vien 2026" in await run_knowledge_search({"query": "x"}, "tr")
+        assert "So tay nhan vien 2026" in await run_knowledge_search({"query": "x"}, CTX)
 
     async def test_khong_tim_thay_thi_NOI_THANG(self, kho: list[RetrievedChunk]) -> None:
-        """Cau nay di thang vao prompt. No phai day model noi that thay vi lay kien
-        thuc chung ra thay the.
+        """Cau nay di thang vao prompt, va no la don bay manh nhat cua ca luong: no
+        den DUNG khoanh khac model vua thay ket qua rong.
         """
-        out = await run_knowledge_search({"query": "gia bitcoin"}, "tr")
+        out = await run_knowledge_search({"query": "gia bitcoin"}, CTX)
 
         assert "Không tìm thấy" in out
-        assert "đừng thay bằng kiến thức chung" in out
+        # Tri nho cua model van bi cam — do la luat cu, KHONG doi.
+        assert "đừng lấy trí nhớ của bạn ra thay thế" in out.lower() or (
+            "trí nhớ" in out and "thay thế" in out
+        )
+
+    async def test_CHAN_tra_web_cho_cau_hoi_noi_bo(self, kho: list[RetrievedChunk]) -> None:
+        """Nhanh nguy hiem hon trong hai nhanh.
+
+        Web tra ve luat lao dong chung cho cau "chinh sach nghi phep nam" — hop ly,
+        co nguon, va SAI voi to chuc nay. Thong diep phai noi ro VI SAO cam, khong
+        chi ra lenh: model tuan lenh co ly do tot hon lenh tran.
+        """
+        out = await run_knowledge_search({"query": "chinh sach nghi phep"}, CTX)
+
+        assert "ĐỪNG tra web" in out
+        assert "quy định riêng" in out
+
+    async def test_CHO_PHEP_tra_web_cho_kien_thuc_chung(
+        self, kho: list[RetrievedChunk]
+    ) -> None:
+        out = await run_knowledge_search({"query": "cach lam bun cha"}, CTX)
+
+        assert "web_search" in out
+        assert "lấy từ web" in out
 
     async def test_thieu_query_thi_nem(self, kho: list[RetrievedChunk]) -> None:
         with pytest.raises(ValueError):
-            await run_knowledge_search({}, "tr")
+            await run_knowledge_search({}, CTX)
 
     async def test_query_rong_thi_nem(self, kho: list[RetrievedChunk]) -> None:
         with pytest.raises(ValueError):
-            await run_knowledge_search({"query": "   "}, "tr")
+            await run_knowledge_search({"query": "   "}, CTX)
 
     async def test_query_khong_phai_chuoi_thi_nem(self, kho: list[RetrievedChunk]) -> None:
         payload: dict[str, Any] = {"query": 42}

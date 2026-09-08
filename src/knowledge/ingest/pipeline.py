@@ -19,7 +19,7 @@ from infra.logger import get_logger
 from llm.embedder import get_embedder
 
 from .chunk import Chunk, chunk_document
-from .extract import extract_text
+from .extract import extract_document
 
 _log = get_logger()
 
@@ -65,7 +65,8 @@ def _checksum(text: str) -> str:
 
 async def ingest_file(path: Path, ingested_by: str, title: str | None = None) -> IngestResult:
     doc_title = title or path.stem
-    text = extract_text(path)
+    tai_lieu = extract_document(path)
+    text = tai_lieu.text
     if not text.strip():
         raise ValueError(f"{path} khong co chu nao doc duoc")
 
@@ -91,7 +92,7 @@ async def ingest_file(path: Path, ingested_by: str, title: str | None = None) ->
         )
 
     version = int(existing[0]["version"]) + 1 if existing else 1
-    chunks = chunk_document(text)
+    chunks = chunk_document(text, tai_lieu.ban_do_trang)
     if not chunks:
         raise ValueError(f"{path} khong cat duoc chunk nao")
 
@@ -119,6 +120,17 @@ async def ingest_file(path: Path, ingested_by: str, title: str | None = None) ->
     # Mot transaction cho ca tai lieu: hong giua chung ma van de lai nua so chunk
     # nghia la bot tra loi dua tren nua tai lieu ma khong ai biet.
     async with transaction() as connection:
+        # Ha co ban cu TRUOC khi chen ban moi. Phai nam trong cung transaction: nam
+        # ngoai thi co mot khoang thoi gian hoac khong ban nao la moi nhat (mat het
+        # ket qua tim kiem), hoac hai ban cung la moi nhat (tron v1 voi v2).
+        #
+        # Chi muc UNIQUE o migration 0012 cuong che bat bien nay bang CSDL, nen quen
+        # dong nay se thanh loi chen thay vi mot ket qua tim kiem sai am tham.
+        await connection.execute(
+            "UPDATE kb_document SET la_ban_moi_nhat = false "
+            "WHERE source_path = $1 AND la_ban_moi_nhat",
+            source_path,
+        )
         row = await connection.fetchrow(
             """INSERT INTO kb_document (title, source_path, version, checksum, ingested_by)
                VALUES ($1, $2, $3, $4, $5) RETURNING id""",
@@ -133,10 +145,13 @@ async def ingest_file(path: Path, ingested_by: str, title: str | None = None) ->
             await connection.execute(
                 """INSERT INTO kb_chunk
                      (doc_id, ord, section, page, content, embed_input, embedding, token_count)
-                   VALUES ($1,$2,$3,NULL,$4,$5,$6::vector,$7)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8)""",
                 doc_id,
                 chunk.ord,
                 chunk.section,
+                # Truoc day la NULL cung, nen cong cu `search_knowledge_base` co san
+                # nhanh in "trang {c.page}" ma chua bao gio chay.
+                chunk.page,
                 chunk.content,
                 embed_input,
                 "[" + ",".join(f"{v:.7f}" for v in vector) + "]",

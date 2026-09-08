@@ -19,6 +19,7 @@ from agents.prompt.budget import CHARS_PER_TOKEN
 from infra.logger import get_logger
 from shared.chunk_text import chunk_text
 
+from .clean import trang_cua
 from .profiles import HoSo, nhan_dien
 
 _log = get_logger()
@@ -42,26 +43,44 @@ class Chunk:
     #: duoc no nam o dau.
     section: str | None
     content: str
+    #: So trang cua cho chunk BAT DAU. None khi tai lieu khong co trang (.md/.docx)
+    #: hoac khi khong doc duoc so trang in tren tai lieu.
+    page: int | None = None
+
+    #: Vi tri va do dai cua PHAN GOC (truoc khi ap chong lan) trong van ban nguon.
+    #: Khong ghi vao CSDL — chi dung de tinh do phu va suy ra so trang.
+    #:
+    #: Ton tai vi mot ly do cu the: sau khi ap chong lan, `content` KHONG con la mot
+    #: lat cat lien tuc cua van ban (duoi manh truoc bi lstrip roi noi bang '\n'),
+    #: nen `text.find(content)` truot. Do phu tinh bang cach do tung do sai 54,7%
+    #: tren mot tai lieu khong mat mot ky tu nao.
+    bat_dau: int = 0
+    dai_goc: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class _Section:
     path: str | None
     body: str
+    #: Vi tri bat dau cua `body` trong van ban goc. Can de suy ra so trang; khong co
+    #: no thi phai di tim lai chuoi trong van ban, ma chunk co chong lan nen tim lai
+    #: se ra sai cho.
+    bat_dau: int = 0
 
 
 def _split_by_heading(text: str) -> list[_Section]:
     """Cat theo tieu de markdown, giu DUONG DAN tieu de (cha > con)."""
     matches = list(_HEADING.finditer(text))
     if not matches:
-        return [_Section(path=None, body=text)]
+        return [_Section(path=None, body=text, bat_dau=0)]
 
     sections: list[_Section] = []
     # Phan van ban truoc tieu de dau tien (loi noi dau, muc luc...) van phai giu.
     if matches[0].start() > 0:
-        head = text[: matches[0].start()].strip()
+        tho = text[: matches[0].start()]
+        head = tho.strip()
         if head:
-            sections.append(_Section(path=None, body=head))
+            sections.append(_Section(path=None, body=head, bat_dau=tho.index(head)))
 
     stack: list[str] = []
     for i, match in enumerate(matches):
@@ -71,9 +90,16 @@ def _split_by_heading(text: str) -> list[_Section]:
         stack.append(title)
 
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[match.end() : end].strip()
+        tho = text[match.end() : end]
+        body = tho.strip()
         if body:
-            sections.append(_Section(path=" > ".join(stack), body=body))
+            sections.append(
+                _Section(
+                    path=" > ".join(stack),
+                    body=body,
+                    bat_dau=match.end() + tho.index(body),
+                )
+            )
     return sections
 
 
@@ -86,21 +112,38 @@ def _split_by_profile(text: str, ho_so: HoSo) -> list[_Section]:
     """
     khop = list(ho_so.moc.finditer(text))
     if not khop:
-        return [_Section(path=None, body=text)]
+        return [_Section(path=None, body=text, bat_dau=0)]
 
     sections: list[_Section] = []
     # Phan truoc moc dau tien (loi noi dau, muc luc, cac chuong khong phai cong thuc)
     # van phai giu — bo di la mat mot phan tai lieu ma khong ai bao.
-    dau = text[: khop[0].start()].strip()
+    tho = text[: khop[0].start()]
+    dau = tho.strip()
     if dau:
-        sections.append(_Section(path=None, body=dau))
+        sections.append(_Section(path=None, body=dau, bat_dau=tho.index(dau)))
 
+    # Tieu de LIEN NHAU (khong co than o giua) duoc GOP lam mot.
+    #
+    # Tai lieu song ngu dat ten mon hai lan lien tiep — ban tieng Viet roi ban tieng
+    # Anh. Cat thanh hai muc se cho ra mot muc RONG mang ten tieng Viet, va toan bo
+    # noi dung roi vao muc tieng Anh. Gop lai thi `section` mang CA HAI ten, tuc cau
+    # hoi bang ca hai thu tieng deu khop duoc o duong BM25.
+    cho: list[str] = []
     for i, m in enumerate(khop):
-        ten = m.group(1).strip()
+        cho.append(m.group(1).strip())
         het = khop[i + 1].start() if i + 1 < len(khop) else len(text)
-        than = text[m.start() : het].strip()
-        if than:
-            sections.append(_Section(path=ten, body=than))
+        tho = text[m.start() : het]
+        than = tho.strip()
+        if not than or than == m.group(1).strip():
+            continue  # tieu de khong co than — de danh, gop vao tieu de ke tiep
+        sections.append(
+            _Section(
+                path=" / ".join(cho),
+                body=than,
+                bat_dau=m.start() + tho.index(than),
+            )
+        )
+        cho = []
     return sections
 
 
@@ -140,12 +183,35 @@ def _cat_muc(text: str) -> list[_Section]:
     return theo_ho_so
 
 
-def chunk_document(text: str) -> list[Chunk]:
+def chunk_document(
+    text: str, ban_do_trang: list[tuple[int, int | None]] | None = None
+) -> list[Chunk]:
+    """Cat tai lieu thanh chunk. Co `ban_do_trang` thi moi chunk mang them so trang.
+
+    Offset duoc tinh TRUOC khi ap chong lan, va do la diem mau chot: `chunk_text` giu
+    bat bien `"".join(pieces) == text`, nen cong don do dai cac manh cho ra vi tri
+    that. Sau khi ap chong lan thi manh khong con la lat cat lien tuc cua van ban nua
+    — di tim lai chuoi luc do se ra nham cho, vi phan chong lan xuat hien hai lan.
+    """
     chunks: list[Chunk] = []
     for section in _cat_muc(text):
-        pieces = _with_overlap(chunk_text(section.body, TARGET_CHARS))
-        for piece in pieces:
+        # Giu ban goc de tinh vi tri, ban da chong lan de lam noi dung.
+        goc = chunk_text(section.body, TARGET_CHARS)
+        pieces = _with_overlap(goc)
+
+        vi_tri = section.bat_dau
+        for goc_i, piece in zip(goc, pieces, strict=True):
             body = piece.strip()
             if body:
-                chunks.append(Chunk(ord=len(chunks), section=section.path, content=body))
+                chunks.append(
+                    Chunk(
+                        ord=len(chunks),
+                        section=section.path,
+                        content=body,
+                        page=trang_cua(ban_do_trang, vi_tri) if ban_do_trang else None,
+                        bat_dau=vi_tri,
+                        dai_goc=len(goc_i),
+                    )
+                )
+            vi_tri += len(goc_i)
     return chunks

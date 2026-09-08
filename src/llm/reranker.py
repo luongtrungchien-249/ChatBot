@@ -44,6 +44,15 @@ class RerankHit:
 
 
 class RerankerPort(Protocol):
+    #: Diem tra ve co phai DO LIEN QUAN da hieu chuan khong.
+    #:
+    #: Cross-encoder that: True — diem so sanh duoc voi mot nguong co dinh.
+    #: Ban du phong: False — diem la ti le TU TRUNG, mot dai luong khac han.
+    #: Cho goi dung co nay de biet co duoc phep dung diem de LOC hay khong;
+    #: dung nham thi cau hoi tieng Viet tren tai lieu tieng Anh se bi loai
+    #: sach du tang vector da tim dung chunk.
+    diem_dang_tin: bool
+
     async def rerank(self, query: str, documents: list[str], top_n: int) -> list[RerankHit]:
         """Xep lai `documents` theo do tra loi duoc `query`.
 
@@ -55,6 +64,8 @@ class RerankerPort(Protocol):
 
 
 class CohereReranker:
+    diem_dang_tin = True
+
     async def rerank(self, query: str, documents: list[str], top_n: int) -> list[RerankHit]:
         if not documents:
             return []
@@ -93,10 +104,16 @@ class LexicalOverlapReranker:
     chay duoc, de test khong phai goi mang, va de mot nguoi chua mua khoa rerank van
     hoi duoc tai lieu cua minh — ket qua kem hon, nhung khong im lang.
 
-    Diem tra ve nam trong [0;1] nen so sanh voi RERANK_MIN_SCORE van co nghia, du
-    thang diem khac han cross-encoder. Doi lai nguong 0,35 la CHAT voi ban nay:
-    it cau hoi nao lap lai 35% so tu cua no trong doan van.
+    Diem cua no KHONG phai do lien quan ma la ti le TU TRUNG — nen `diem_dang_tin
+    = False`, va cho goi phai lay khoang cach vector lam thuoc do lien quan thay
+    vi lay diem nay.
+
+    Do duoc 08/09/2026: cau hoi tieng Viet tren tai lieu tieng Anh dat toi da
+    0,00 — khong tu nao trung duoc — trong khi tang vector tim dung chunk o hang
+    1. Dung diem nay de loc la vut di ket qua dung.
     """
+
+    diem_dang_tin = False
 
     async def rerank(self, query: str, documents: list[str], top_n: int) -> list[RerankHit]:
         terms = _terms(query)

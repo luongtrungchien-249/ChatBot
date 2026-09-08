@@ -38,7 +38,10 @@ from .youtube import (
 
 _log = get_logger()
 
-Runner = Callable[[dict[str, Any], str], Awaitable[str]]
+#: Nhan CA CallContext chu khong chi trace_id: cong cu tra cuu tai lieu can
+#: `ctx.scope` de loc theo nhom. Truyen ca ctx thay vi them tham so thu ba cho
+#: rieng mot cong cu — mot chu ky cho moi cong cu thi khong ai phai nho hai luat.
+Runner = Callable[[dict[str, Any], CallContext], Awaitable[str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +165,7 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
     try:
         _log.info("goi cong cu", trace_id=ctx.trace_id, tool=call.name, input=call.input)
         raw = await _compress_if_too_long(
-            await registration.run(call.input, ctx.trace_id), call.name, ctx
+            await registration.run(call.input, ctx), call.name, ctx
         )
         latency_ms = await _ghi_so(call, ctx, started, ok=True)
         _log.info("cong cu tra ve", trace_id=ctx.trace_id, tool=call.name, latency_ms=latency_ms)

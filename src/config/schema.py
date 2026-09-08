@@ -41,6 +41,30 @@ class Settings(BaseSettings):
     RERANK_PROVIDER: str = Field(min_length=1)
     RERANK_API_KEY: str = Field(min_length=1)
     RERANK_MODEL: str = Field(min_length=1)
+    # Tran khoang cach cosine de mot chunk duoc coi la co lien quan.
+    #
+    # Chi dung khi reranker KHONG phai cross-encoder that (xem
+    # llm/reranker.py: `diem_dang_tin`). Ban du phong cham do trung TU VUNG,
+    # nen diem cua no khong phai do lien quan — dung no de LOC la sai ve ban
+    # chat khi cau hoi va tai lieu khac ngon ngu.
+    #
+    # NGUONG NAY PHU THUOC CORPUS. Do hai lan, va lan hai chung minh dieu do:
+    #
+    #   corpus TIENG ANH (cookbook, 14 cau hoi tieng Viet):
+    #       cau CO trong tai lieu   0,4382 - 0,7587
+    #       cau NGOAI tai lieu      0,7918 - 0,9294     -> nguong 0,78
+    #
+    #   corpus TRON Anh + Viet (them booklet Sa Pa, 17 cau):
+    #       cau CO trong tai lieu   0,3183 - 0,5607
+    #       cau NGOAI tai lieu      0,6987 - 0,7751     -> nguong 0,63
+    #
+    # Them tai lieu tieng Viet keo MOI cau hoi tieng Viet lai gan hon, nen giu 0,78
+    # thi cau "luong thang 13 tinh the nao" (0,7698) lot qua va bot tra ve cong thuc
+    # nau an. Doi lai khoang tach RONG HON han: 0,138 so voi 0,033.
+    #
+    # Mau nho (17 cau) — do lai moi khi corpus doi.
+    RAG_MAX_DISTANCE: float = Field(default=0.63, gt=0.0, le=2.0)
+
     RERANK_MIN_SCORE: float = Field(ge=0, le=1)
 
     # --- Ha tang ---

@@ -30,6 +30,7 @@ from typing import Any
 
 import httpx
 
+from agents.ports.llm import CallContext
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
 from infra.http import get_http
@@ -211,7 +212,7 @@ def _dinh_dang(item: dict[str, Any]) -> str:
     return "\n".join(dong)
 
 
-async def run_youtube_stats(payload: dict[str, Any], _trace_id: str) -> str:
+async def run_youtube_stats(payload: dict[str, Any], _ctx: CallContext) -> str:
     raw = payload.get("video")
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("youtube_stats can tham so video (link hoac ID)")
@@ -286,7 +287,7 @@ async def _lay_thong_ke(ids: list[str]) -> list[dict[str, Any]]:
     return items
 
 
-async def run_youtube_search(payload: dict[str, Any], _trace_id: str) -> str:
+async def run_youtube_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     """Tim theo ten roi lay so lieu that — HAI lan goi API trong mot lan goi cong cu.
 
     `search.list` KHONG tra ve thong ke, chi tra ve id va snippet. Nen phai goi tiep

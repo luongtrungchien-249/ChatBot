@@ -28,11 +28,25 @@ class TestBoCucNamKhoi:
 
     def test_co_phan_few_shot(self) -> None:
         assert "# VÍ DỤ" in SYSTEM_PROMPT
-        # Sau vi du: khong tim thay, trich nguon, CHON MAC DINH thay vi hoi nguoc,
-        # tu choi chi thi nhung, tu choi lo cau hinh, va KHONG hoi lai hai luot lien
-        # tiep. Hai vi du cuoi them ngay 07/09/2026 sau khi do duoc vong hoi lai vo
-        # tan tren bot that — xem docs/plan-thi-cong.md section 18.
-        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 6
+        # Bay vi du: khong tim thay (noi bo -> DUNG), khong tim thay (kien thuc
+        # chung -> tra web), trich nguon, CHON MAC DINH thay vi hoi nguoc, tu choi
+        # chi thi nhung, tu choi lo cau hinh, va KHONG hoi lai hai luot lien tiep.
+        #
+        # Hai vi du 5-6 them 07/09/2026 sau khi do duoc vong hoi lai vo tan tren bot
+        # that (docs/plan-thi-cong.md section 18). Vi du 1b them 08/09/2026 khi mo
+        # luong RAG-truoc-web-sau.
+        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 7
+
+    def test_day_ca_hai_nhanh_khi_tai_lieu_KHONG_co(self) -> None:
+        """Hai nhanh co gia rat khac nhau, nen prompt phai day ca hai.
+
+        Cau hoi NOI BO ma tra web thi nhan ve luat chung — hop ly, co nguon, va SAI
+        voi to chuc nay; nguoi dung se hanh dong theo. Cau hoi KIEN THUC CHUNG ma
+        khong tra web thi bo phi mot cau tra loi tot ma web co san.
+        """
+        assert "Ví dụ 1b" in SYSTEM_PROMPT
+        assert "không tra web" in SYSTEM_PROMPT
+        assert "tra ngoài" in SYSTEM_PROMPT
 
 
 class TestLuatAnToan:

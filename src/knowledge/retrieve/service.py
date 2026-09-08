@@ -13,8 +13,10 @@ cung mot cau hoi duoc go lai rat nhieu.
 """
 
 import asyncio
+from typing import Any
 
 from agents.domain.knowledge import RetrievedChunk
+from agents.domain.thread import ThreadScope
 from config import get_settings
 from infra.logger import get_logger
 
@@ -31,7 +33,9 @@ FUSION_TOP = 10
 class HybridKnowledge:
     """Kho tri thuc lai (hybrid)."""
 
-    async def search(self, query: str, k: int) -> list[RetrievedChunk]:
+    async def search(
+        self, scope: ThreadScope, query: str, k: int
+    ) -> list[RetrievedChunk]:
         if not query.strip():
             return []
 
@@ -41,8 +45,8 @@ class HybridKnowledge:
         # return_exceptions=True vi mot duong chet khong duoc lam hong ca lan tim:
         # vector con chay thi van tra loi duoc, chi kem hon.
         vector_hits, lexical_hits = await asyncio.gather(
-            vector_search(query, CANDIDATES_PER_SIDE),
-            lexical_search(query, CANDIDATES_PER_SIDE),
+            vector_search(scope, query, CANDIDATES_PER_SIDE),
+            lexical_search(scope, query, CANDIDATES_PER_SIDE),
             return_exceptions=True,
         )
 
@@ -67,9 +71,10 @@ class HybridKnowledge:
     ) -> list[RetrievedChunk]:
         from llm.reranker import get_reranker
 
-        min_score = get_settings().RERANK_MIN_SCORE
+        reranker = get_reranker()
+        settings = get_settings()
         try:
-            hits = await get_reranker().rerank(query, [c.content for c in candidates], k)
+            hits = await reranker.rerank(query, [c.content for c in candidates], k)
         except Exception as error:
             # Rerank hong thi giu nguyen thu tu RRF va CAT theo k. Khong tra ve rong:
             # rong nghia la "khong co trong tai lieu", tuc la noi doi ve mot su co
@@ -78,16 +83,58 @@ class HybridKnowledge:
             _log.error("rerank that bai — dung thu tu RRF, KHONG loc nguong", err=str(error))
             return [_to_chunk(c, score=0.0) for c in candidates[:k]]
 
-        kept = [
-            _to_chunk(candidates[h.index], score=h.score)
-            for h in hits
-            if h.index < len(candidates) and h.score >= min_score
-        ]
+        hop_le = [h for h in hits if h.index < len(candidates)]
+
+        if reranker.diem_dang_tin:
+            return self._loc_theo_diem(hop_le, candidates, settings.RERANK_MIN_SCORE)
+        return self._loc_theo_khoang_cach(hop_le, candidates, settings.RAG_MAX_DISTANCE)
+
+    @staticmethod
+    def _loc_theo_diem(
+        hits: list[Any], candidates: list[ChunkRow], nguong: float
+    ) -> list[RetrievedChunk]:
+        """Duong CHUAN: cross-encoder that, diem la do lien quan da hieu chuan."""
+        kept = [_to_chunk(candidates[h.index], score=h.score) for h in hits if h.score >= nguong]
         if not kept and hits:
             _log.info(
                 "co ket qua nhung deu duoi nguong — coi nhu khong tim thay",
                 diem_cao_nhat=max(h.score for h in hits),
-                nguong=min_score,
+                nguong=nguong,
+            )
+        return kept
+
+    @staticmethod
+    def _loc_theo_khoang_cach(
+        hits: list[Any], candidates: list[ChunkRow], tran: float
+    ) -> list[RetrievedChunk]:
+        """Duong DU PHONG: ban rerank khong phai cross-encoder.
+
+        No cham do trung TU VUNG, khong phai do lien quan — nen no duoc quyen XEP THU
+        TU nhung KHONG duoc quyen LOC. Do duoc 08/09/2026: cau hoi tieng Viet tren tai
+        lieu tieng Anh dat diem toi da 0,00 vi khong tu nao trung, trong khi tang
+        vector tim dung chunk o hang 1. Loc bang diem do la vut di ket qua dung, roi
+        bot noi "khong tim thay" ve mot thu dang nam trong CSDL — mot loi IM LANG.
+
+        Thay vao do lay KHOANG CACH COSINE, thu co hieu chuan ngu nghia. Do tren 14
+        cau hoi tieng Viet: cau CO trong tai lieu 0,4382-0,7587, cau NGOAI tai lieu
+        0,7918-0,9294 — hai phan bo tach roi.
+
+        Chunk den tu duong BM25 khong co khoang cach (`distance is None`): GIU lai.
+        Khop duoc bang tu la mot tin hieu doc lap va manh, khong can thuoc do nay.
+        """
+        kept: list[RetrievedChunk] = []
+        for h in hits:
+            row = candidates[h.index]
+            if row.distance is None or row.distance <= tran:
+                kept.append(_to_chunk(row, score=h.score))
+
+        if not kept and hits:
+            gan_nhat = [candidates[h.index].distance for h in hits]
+            gan_nhat = [d for d in gan_nhat if d is not None]
+            _log.info(
+                "moi ung vien deu qua xa ve ngu nghia — coi nhu khong tim thay",
+                khoang_cach_gan_nhat=round(min(gan_nhat), 4) if gan_nhat else None,
+                tran=tran,
             )
         return kept
 
