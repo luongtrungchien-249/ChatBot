@@ -54,8 +54,8 @@ class Registration:
     available: Callable[[], bool]
 
 
-async def _run_paper_search(payload: dict[str, Any], trace_id: str) -> str:
-    return await run_paper_search(payload, trace_id, _log)
+async def _run_paper_search(payload: dict[str, Any], ctx: CallContext) -> str:
+    return await run_paper_search(payload, ctx, _log)
 
 
 _REGISTRY: tuple[Registration, ...] = (

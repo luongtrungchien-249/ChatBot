@@ -17,7 +17,6 @@ from tools.knowledge_search import (
     run_knowledge_search,
 )
 
-
 #: Pham vi di cung moi lan goi cong cu, y het hop dong cua memory_fact.
 CTX = CallContext(
     scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr"
@@ -155,4 +154,4 @@ class TestKetQua:
     async def test_query_khong_phai_chuoi_thi_nem(self, kho: list[RetrievedChunk]) -> None:
         payload: dict[str, Any] = {"query": 42}
         with pytest.raises(ValueError):
-            await run_knowledge_search(payload, "tr")
+            await run_knowledge_search(payload, CTX)

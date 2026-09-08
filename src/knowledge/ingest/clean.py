@@ -24,6 +24,7 @@ van ban von dung, va khong ai phat hien ra — dung loai loi im lang ma du an na
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 #: Ti le trang phai cung khop thi mot quy luat moi duoc coi la that. Duoi nguong nay
@@ -173,7 +174,9 @@ def _gop_chu_cai_doc(noi_dung: str) -> str:
 #:     "5 or 6 carrots, sliced"
 #: dong sau bat dau bang CHU SO nen khong bi noi. "INSTRUCTIONS:" ket thuc bang ':'
 #: nen cung khong bi noi vao buoc 1.
-_GAY_DONG = re.compile(r"(?<=[^\s.!?:;•\-–—])\n(?=[a-z])")
+#: Trong lop ky tu co ca EN DASH va EM DASH, CO Y chu khong phai go nham dau tru:
+#: mot dong ket thuc bang chung la ket thuc menh de, khong duoc noi vao dong sau.
+_GAY_DONG = re.compile(r"(?<=[^\s.!?:;•\-–—])\n(?=[a-z])")  # noqa: RUF001
 
 
 def _noi_dong_gay(noi_dung: str) -> str:
@@ -256,9 +259,13 @@ def ghep(trang: list[Trang]) -> tuple[str, list[tuple[int, int | None]]]:
     return "\n\n".join(phan), ban_do
 
 
-def trang_cua(ban_do: list[tuple[int, int | None]], vi_tri: int) -> int | None:
+def trang_cua(ban_do: Sequence[tuple[int, int | None]], vi_tri: int) -> int | None:
     """So trang chua `vi_tri`. Ban do da sap nen duyet nguoc la du va khong can bisect
     cho vai tram phan tu.
+
+    Nhan `Sequence` chu khong `list`: `list` la BAT BIEN trong he kieu, nen mot
+    `list[tuple[int, int]]` (ban do khong co trang nao None) se bi tu choi du no hoan
+    toan hop le. `Sequence` hiep bien nen nhan duoc ca hai.
     """
     ket_qua: int | None = None
     for bat_dau, so in ban_do:

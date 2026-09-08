@@ -129,7 +129,10 @@ def in_bao_cao(bc: BaoCao) -> None:
         dong(f"chunk vuot tran {TARGET_CHARS}", bc.vuot_tran)
 
     print("\nMetadata co dung?")
-    pct = lambda n: f"{n}/{bc.so_chunk}" + (f" ({100 * n // bc.so_chunk}%)" if bc.so_chunk else "")
+    def pct(n: int) -> str:
+        ti_le = f" ({100 * n // bc.so_chunk}%)" if bc.so_chunk else ""
+        return f"{n}/{bc.so_chunk}{ti_le}"
+
     dong("chunk co section", pct(bc.co_section), bc.co_section == 0)
     dong("chunk co page", pct(bc.co_page), bc.co_page == 0)
 

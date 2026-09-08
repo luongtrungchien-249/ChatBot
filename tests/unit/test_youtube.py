@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+from agents.domain.thread import ThreadScope
+from agents.ports.llm import CallContext
 from tools.youtube import (
     YOUTUBE_STATS_DEFINITION,
     run_youtube_stats,
@@ -22,6 +24,11 @@ from tools.youtube import (
 )
 
 ID = "dQw4w9WgXcQ"
+
+#: Cong cu nhan CallContext chu khong chi trace_id — mot chu ky cho moi cong cu.
+CTX = CallContext(
+    scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr"
+)
 
 
 class TestDocLink:
@@ -94,7 +101,7 @@ class TestSoLieu:
             },
         )
 
-        ra = await run_youtube_stats({"video": f"https://youtu.be/{ID}"}, "tr")
+        ra = await run_youtube_stats({"video": f"https://youtu.be/{ID}"}, CTX)
 
         assert "Bai hat thu nghiem" in ra
         assert "Kenh Thu" in ra
@@ -114,7 +121,7 @@ class TestSoLieu:
         """
         phan_hoi(monkeypatch, {"items": [video(viewCount="1000", commentCount="5")]})
 
-        ra = await run_youtube_stats({"video": ID}, "tr")
+        ra = await run_youtube_stats({"video": ID}, CTX)
 
         assert "DA AN" in ra
         assert "dung doan" in ra
@@ -123,7 +130,7 @@ class TestSoLieu:
     async def test_binh_luan_bi_tat(self, monkeypatch: pytest.MonkeyPatch) -> None:
         phan_hoi(monkeypatch, {"items": [video(viewCount="1000", likeCount="10")]})
 
-        ra = await run_youtube_stats({"video": ID}, "tr")
+        ra = await run_youtube_stats({"video": ID}, CTX)
 
         assert "da tat hoac bi an" in ra
 
@@ -137,7 +144,7 @@ class TestSoLieu:
         """
         phan_hoi(monkeypatch, {"items": [video(viewCount="1", likeCount="1")]})
 
-        ra = await run_youtube_stats({"video": ID}, "tr")
+        ra = await run_youtube_stats({"video": ID}, CTX)
 
         assert "THOI DIEM TRA CUU" in ra
         assert "12/2021" in ra
@@ -148,7 +155,7 @@ class TestNhanhHong:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Khác hẳn "không tìm thấy video" — hai câu dẫn người dùng đi hai hướng."""
-        ra = await run_youtube_stats({"video": "https://vimeo.com/12345"}, "tr")
+        ra = await run_youtube_stats({"video": "https://vimeo.com/12345"}, CTX)
 
         assert "Khong doc duoc ID" in ra
         assert "dung doan noi dung video" in ra
@@ -156,7 +163,7 @@ class TestNhanhHong:
     async def test_video_rieng_tu_hoac_da_xoa(self, monkeypatch: pytest.MonkeyPatch) -> None:
         phan_hoi(monkeypatch, {"items": []})
 
-        ra = await run_youtube_stats({"video": ID}, "tr")
+        ra = await run_youtube_stats({"video": ID}, CTX)
 
         assert "Khong tim thay video" in ra
         assert "dung suy doan" in ra
@@ -167,7 +174,7 @@ class TestNhanhHong:
         """Im lặng bỏ qua sẽ làm người dùng tưởng bot đã tra cứu đủ."""
         phan_hoi(monkeypatch, {"items": [video(viewCount="10", likeCount="1")]})
 
-        ra = await run_youtube_stats({"video": f"{ID},aaaaaaaaaaa"}, "tr")
+        ra = await run_youtube_stats({"video": f"{ID},aaaaaaaaaaa"}, CTX)
 
         assert "aaaaaaaaaaa" in ra
         assert "rieng tu hoac da xoa" in ra
@@ -177,15 +184,15 @@ class TestNhanhHong:
         phan_hoi(monkeypatch, {"error": {"message": "quota"}}, status=403)
 
         with pytest.raises(RuntimeError):
-            await run_youtube_stats({"video": ID}, "tr")
+            await run_youtube_stats({"video": ID}, CTX)
 
     async def test_thieu_tham_so(self) -> None:
         with pytest.raises(ValueError):
-            await run_youtube_stats({}, "tr")
+            await run_youtube_stats({}, CTX)
 
     async def test_tham_so_rong(self) -> None:
         with pytest.raises(ValueError):
-            await run_youtube_stats({"video": "   "}, "tr")
+            await run_youtube_stats({"video": "   "}, CTX)
 
 
 class TestKhaiBao:

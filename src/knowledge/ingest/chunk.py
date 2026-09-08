@@ -12,6 +12,7 @@ cau hoi khop chunk sau, nhung dieu kien cua no lai o cuoi chunk truoc.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -184,7 +185,7 @@ def _cat_muc(text: str) -> list[_Section]:
 
 
 def chunk_document(
-    text: str, ban_do_trang: list[tuple[int, int | None]] | None = None
+    text: str, ban_do_trang: Sequence[tuple[int, int | None]] | None = None
 ) -> list[Chunk]:
     """Cat tai lieu thanh chunk. Co `ban_do_trang` thi moi chunk mang them so trang.
 

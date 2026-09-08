@@ -18,8 +18,8 @@ from typing import Any
 
 import httpx
 
-from agents.ports.logger import LoggerPort
 from agents.ports.llm import CallContext
+from agents.ports.logger import LoggerPort
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
 from infra.http import get_http
@@ -372,7 +372,7 @@ async def run_paper_search(
             if logger is not None:
                 logger.warning(
                     "mot nguon paper_search that bai — van tra ve phan con lai",
-                    trace_id=trace_id,
+                    trace_id=ctx.trace_id,
                     source=name,
                     err=str(outcome)[:200],
                 )

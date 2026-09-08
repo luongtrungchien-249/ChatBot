@@ -15,10 +15,15 @@ from pathlib import Path
 
 import pytest
 
+from agents.domain.thread import ThreadScope
 from infra.db import execute, fetch
 from knowledge.ingest.pipeline import ingest_file
 from knowledge.retrieve.search import lexical_search, vector_search
 from knowledge.retrieve.service import knowledge
+
+#: Pham vi cua lan tim. Tai lieu nap qua cli co pham_vi="chung" nen moi nhom deu
+#: doc duoc — day la mac dinh, va no duoc test rieng o test_ho_so/test_loc.
+SCOPE = ThreadScope(platform="cli", thread_id="test")
 
 TAI_LIEU = """# So tay thu nghiem
 
@@ -107,12 +112,12 @@ class TestHaiDuongTim:
         tien 7 ngay" ra hai vector khong lien quan. Chay test nay voi embedder gia
         la tu lua: no se do (hoac xanh) vi mot ly do khong dinh gi toi ngu nghia.
         """
-        hits = await vector_search("bao lau thi duoc tra lai tien", limit=5)
+        hits = await vector_search(SCOPE, "bao lau thi duoc tra lai tien", limit=5)
         assert any("hoan tien" in h.content.lower() for h in hits)
 
     async def test_lexical_tim_duoc_theo_MA_SO(self, tai_lieu_da_nap: str) -> None:
         """Dung ca ma vector search hong nhat: ma san pham, so hieu van ban."""
-        hits = await lexical_search("HT-2026-0042", limit=5)
+        hits = await lexical_search(SCOPE, "HT-2026-0042", limit=5)
         assert any("HT-2026-0042" in h.content for h in hits)
 
     async def test_lexical_tim_duoc_theo_TEN_MUC(self, tai_lieu_da_nap: str) -> None:
@@ -122,15 +127,15 @@ class TestHaiDuongTim:
         cot `section` tu luc cat chunk — nen "nghi phep nam" khong khop MOT tu nao.
         Migration 0008 doi sang sinh tsv tu `embed_input`.
         """
-        hits = await lexical_search("nghi phep nam", limit=5)
+        hits = await lexical_search(SCOPE, "nghi phep nam", limit=5)
         assert any("phep nam" in h.content.lower() for h in hits)
 
     async def test_lexical_khop_du_cau_hoi_KHONG_DAU(self, tai_lieu_da_nap: str) -> None:
         """Postgres khong co dictionary tieng Viet. vn_tsv() bo dau ca hai phia —
         thieu buoc do thi "nghi phep" khong khop "nghỉ phép".
         """
-        co_dau = await lexical_search("nghỉ phép", limit=5)
-        khong_dau = await lexical_search("nghi phep", limit=5)
+        co_dau = await lexical_search(SCOPE, "nghỉ phép", limit=5)
+        khong_dau = await lexical_search(SCOPE, "nghi phep", limit=5)
         assert co_dau and khong_dau
         assert {h.chunk_id for h in co_dau} == {h.chunk_id for h in khong_dau}
 
@@ -148,7 +153,7 @@ class TestDuongTimDayDu:
         lieu khac mot ngay nao do se duoc nap vao — mot test se do vi mot ly do
         khong lien quan gi toi cai no dinh kiem.
         """
-        hits = await knowledge.search("hoan tien trong bao lau", 5)
+        hits = await knowledge.search(SCOPE, "hoan tien trong bao lau", 5)
         cua_ta = [h for h in hits if h.doc_title == tai_lieu_da_nap]
         assert cua_ta, [h.doc_title for h in hits]
         assert "7 ngay" in cua_ta[0].content
@@ -159,18 +164,18 @@ class TestDuongTimDayDu:
         """Rong = "khong tim thay trong tai lieu", va do la cai cho phep bot noi
         thang thay vi lay kien thuc chung ra thay the.
         """
-        hits = await knowledge.search("gia bitcoin hom nay bao nhieu", 5)
+        hits = await knowledge.search(SCOPE, "gia bitcoin hom nay bao nhieu", 5)
         assert [h for h in hits if h.doc_title == tai_lieu_da_nap] == []
 
     async def test_cau_hoi_rong_khong_goi_gi_ca(
         self, tai_lieu_da_nap: str, embedding_that: None
     ) -> None:
-        assert await knowledge.search("   ", 3) == []
+        assert await knowledge.search(SCOPE, "   ", 3) == []
 
     async def test_trich_dan_khong_lap_ten_tai_lieu(
         self, tai_lieu_da_nap: str, embedding_that: None
     ) -> None:
-        hits = await knowledge.search("hoan tien trong bao lau", 5)
+        hits = await knowledge.search(SCOPE, "hoan tien trong bao lau", 5)
         cua_ta = [h for h in hits if h.doc_title == tai_lieu_da_nap]
         assert cua_ta
         assert cua_ta[0].section is not None
