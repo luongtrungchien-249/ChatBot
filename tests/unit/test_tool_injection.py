@@ -146,7 +146,6 @@ class TestReactKhongTraoThamQuyen:
             max_tokens=16_000,
             effort="low",
             max_iterations=5,
-            max_tool_calls=8,
             deadline_ms=60_000,
         )
 

@@ -74,10 +74,24 @@ class Settings(BaseSettings):
     # thay mot cong cu roi de no goi that bai la cach nhanh nhat de no bia ket qua.
     TAVILY_API_KEY: str = ""
     SEMANTIC_SCHOLAR_API_KEY: str = ""
+    #: YouTube Data API v3. Khong co khoa thi cong cu youtube_stats khong duoc khai.
+    #: Khong co duong nao khac: so luot thich chi lay duoc qua API chinh thuc — mot
+    #: trang ket qua tim kiem khong mang con so do mot cach dang tin.
+    YOUTUBE_API_KEY: str = ""
 
     # Chan cung cua vong ReAct. Thieu cai nao cung thanh vong dot tien khong day.
-    REACT_MAX_ITERATIONS: int = Field(default=5, gt=0)
-    REACT_MAX_TOOL_CALLS: int = Field(default=8, gt=0)
+    # 5 -> 8 (08/09/2026), do do that. Cau "tim top video roi kiem tra so like" can
+    # mot vong tim danh sach + MOT VONG CHO MOI VIDEO de doi ten sang so lieu. Voi
+    # tran 5, model cham tran khi moi tra duoc mot video va tra ve mot LOI HUA
+    # ("bat dau lay so lieu...") thay vi ket qua.
+    #
+    # Nang tran KHONG lam cau hoi thuong dat hon: vong dung ngay khi model thoi goi
+    # cong cu, va phan lon luot chi dung 1-2 vong. Chot chan that su van la deadline
+    # (45s Zalo / 60s web) — kiem truoc moi vong.
+    #
+    # Khong con tran tong so loi goi cong cu (bo 08/09/2026): xem chu thich dai o
+    # dau agents/pipeline/stages/generate.py.
+    REACT_MAX_ITERATIONS: int = Field(default=8, gt=0)
     REACT_DEADLINE_MS: int = Field(default=60_000, gt=0)
 
     # --- Giao dien web ---

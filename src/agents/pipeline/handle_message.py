@@ -85,7 +85,6 @@ class ReactLimits:
     """Chan cung cua vong ReAct. Xem stages/generate.py."""
 
     max_iterations: int
-    max_tool_calls: int
     deadline_ms: int
 
 
@@ -265,7 +264,6 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
             max_tokens=deps.reply.max_tokens,
             effort=deps.reply.effort,
             max_iterations=deps.react.max_iterations,
-            max_tool_calls=deps.react.max_tool_calls,
             deadline_ms=deps.react.deadline_ms,
             should_stop=deps.should_stop,
             on_event=deps.on_react_event,
