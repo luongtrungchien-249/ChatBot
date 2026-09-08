@@ -28,6 +28,13 @@ from .knowledge_search import (
 )
 from .paper_search import PAPER_SEARCH_DEFINITION, run_paper_search
 from .web_search import WEB_SEARCH_DEFINITION, is_web_search_available, run_web_search
+from .youtube import (
+    YOUTUBE_SEARCH_DEFINITION,
+    YOUTUBE_STATS_DEFINITION,
+    is_youtube_available,
+    run_youtube_search,
+    run_youtube_stats,
+)
 
 _log = get_logger()
 
@@ -61,6 +68,21 @@ _REGISTRY: tuple[Registration, ...] = (
         source="OpenAlex + arXiv + Semantic Scholar + Crossref",
         # Ba trong bon nguon khong can khoa nao ca.
         available=lambda: True,
+    ),
+    Registration(
+        definition=YOUTUBE_STATS_DEFINITION,
+        run=run_youtube_stats,
+        source="YouTube Data API v3",
+        # Thieu khoa thi khong khai. Cho model thay mot cong cu roi de no goi that bai
+        # la cach nhanh nhat de no bia ra so lieu — ma so lieu bia thi trong y het so
+        # lieu that.
+        available=is_youtube_available,
+    ),
+    Registration(
+        definition=YOUTUBE_SEARCH_DEFINITION,
+        run=run_youtube_search,
+        source="YouTube Data API v3",
+        available=is_youtube_available,
     ),
     Registration(
         definition=KNOWLEDGE_SEARCH_DEFINITION,

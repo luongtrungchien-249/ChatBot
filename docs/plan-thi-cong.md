@@ -861,7 +861,7 @@ MEMORY_IMPLICIT_ENABLED=false       # L3 implicit — bot TU trich fact. Mac din
 WEB_PORT=3000  WEB_BIND=127.0.0.1
 DAILY_BUDGET_USD                    # bắt buộc, KHÔNG có mặc định
 TAVILY_API_KEY  SEMANTIC_SCHOLAR_API_KEY            # GĐ 3; S2 tuy chon, khong khoa thi bi 429
-REACT_MAX_ITERATIONS=5  REACT_MAX_TOOL_CALLS=8  REACT_DEADLINE_MS=60000
+REACT_MAX_ITERATIONS=8  REACT_DEADLINE_MS=60000
 ```
 
 Script dev nạp `.env` bằng `--env-file-if-exists`; production lấy env từ `docker-compose`.

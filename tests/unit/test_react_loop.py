@@ -1,6 +1,6 @@
 """Vong ReAct la cho de bien thanh vong dot tien khong day.
 
-Sau chan cung duoi day phai duoc CHUNG MINH, khong phai tin la co.
+Nam chan cung duoi day phai duoc CHUNG MINH, khong phai tin la co.
 """
 
 from typing import Any
@@ -34,7 +34,6 @@ def make_deps(replies: list[LlmResult], **over: Any) -> tuple[GenerateDeps, list
         "max_tokens": 16_000,
         "effort": "low",
         "max_iterations": 5,
-        "max_tool_calls": 8,
         "deadline_ms": 60_000,
         "on_event": events.append,
     }
@@ -101,18 +100,27 @@ class TestSauChanCung:
         assert "Minh tim duoc mot phan." in result.value
         assert "chưa đầy đủ" in result.value
 
-    async def test_chan_2_khong_vuot_tong_so_loi_goi_cong_cu(self) -> None:
-        deps, _ = make_deps(
-            [wants_tools("web_search", "paper_search")], max_iterations=5, max_tool_calls=3
-        )
+    async def test_chay_DU_moi_loi_goi_model_xin_khong_cat_bot(self) -> None:
+        """Truoc day co tran TONG so loi goi cong cu, va no cat ngam.
+
+        Khi cham tran giua mot vong, doan cat vut bot mot phan cac loi goi roi ghi
+        vao lich su nhu the model chi xin bay nhieu — model khong biet minh bi cat
+        nen van tra loi nhu da co du du lieu. Da gap that: hoi "top video nhieu
+        like nhat", model xin tra 5 video mot luot, 3 cai duoc chay, cau tra loi
+        noi ve ca 5.
+
+        So vong + deadline + ngan sach ngay moi la thu chan that.
+        """
+        deps, _ = make_deps([wants_tools("web_search", "paper_search")], max_iterations=5)
 
         await generate(deps, PROMPT, CTX, FakeLogger())
 
         batches: list[tuple[object, ...]] = deps.tools.batches  # type: ignore[attr-defined]
-        total = sum(len(b) for b in batches)
-        assert total <= 3
+        assert batches, "phai co it nhat mot lo duoc chay"
+        for lo in batches:
+            assert len(lo) == 2, "ca hai cong cu model xin deu phai duoc chay"
 
-    async def test_chan_3_qua_deadline_thi_dung_ngay(self) -> None:
+    async def test_chan_2_qua_deadline_thi_dung_ngay(self) -> None:
         # Deadline am = da het han san. Dat 1ms khong dung duoc: dong ho monotonic
         # tren Windows khong nhich du giua cac vong toan cai gia, nen vong lap chay
         # het max_iterations truoc khi deadline kip toi.
@@ -123,7 +131,7 @@ class TestSauChanCung:
         assert deps.llm.calls == []  # type: ignore[attr-defined]
         assert not isinstance(result, Ok)
 
-    async def test_chan_4_ngan_sach_kiem_tra_lai_moi_vong(self) -> None:
+    async def test_chan_3_ngan_sach_kiem_tra_lai_moi_vong(self) -> None:
         rate_limit = FakeRateLimit()
         deps, _ = make_deps(
             [wants_tools("web_search"), wants_tools("web_search"), answer("Xong.")],
@@ -135,7 +143,7 @@ class TestSauChanCung:
         # Ba vong -> ba lan kiem tra. Mot lan o stage budget-guard la khong du.
         assert rate_limit.budget_calls == 3
 
-    async def test_chan_4b_het_ngan_sach_giua_chung_thi_dung(self) -> None:
+    async def test_chan_3b_het_ngan_sach_giua_chung_thi_dung(self) -> None:
         rate_limit = FakeRateLimit(budget_sequence=[True, False])
         deps, _ = make_deps(
             [wants_tools("web_search", text="Mot phan ket qua.")], rate_limit=rate_limit
@@ -147,7 +155,7 @@ class TestSauChanCung:
         assert isinstance(result, Ok)
         assert "chưa đầy đủ" in result.value
 
-    async def test_chan_6_nguoi_dung_bam_dung(self) -> None:
+    async def test_chan_5_nguoi_dung_bam_dung(self) -> None:
         calls = {"n": 0}
 
         async def should_stop() -> bool:

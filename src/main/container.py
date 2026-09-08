@@ -160,7 +160,6 @@ async def build_deps(channel: ChannelPort, platform: Platform | None = None) -> 
         reply=ReplyModel(max_tokens=reply_model.max_tokens, effort=reply_model.effort),
         react=ReactLimits(
             max_iterations=settings.REACT_MAX_ITERATIONS,
-            max_tool_calls=settings.REACT_MAX_TOOL_CALLS,
             deadline_ms=_DEADLINE_MS.get(platform, settings.REACT_DEADLINE_MS)
             if platform
             else settings.REACT_DEADLINE_MS,

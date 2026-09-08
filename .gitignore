@@ -21,3 +21,8 @@ htmlcov/
 evals/corpus/*
 !evals/corpus/.gitkeep
 !evals/corpus/README.md
+
+
+# Không được đẩy data lên git
+lakehouse/datalake
+lakehouse/datawarehouse

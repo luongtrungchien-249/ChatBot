@@ -4,14 +4,24 @@ VONG NAY NAM TRONG PIPELINE, KHONG THAY THE PIPELINE. Cac stage truoc van lo pol
 chong trung, ngan sach, dung ngu canh; cac stage sau van lo gui va ghi so. ReAct
 khong tu co lop an toan nao trong so do.
 
-Sau chan cung. Thieu cai nao cung thanh vong dot tien khong day:
+Nam chan cung. Thieu cai nao cung thanh vong dot tien khong day:
   1. So vong toi da
-  2. Tong so loi goi cong cu
-  3. Deadline treo dong ho
-  4. Ngan sach ngay — kiem tra lai TRUOC MOI VONG, vi mot cau hoi co the ton nhieu
+  2. Deadline treo dong ho
+  3. Ngan sach ngay — kiem tra lai TRUOC MOI VONG, vi mot cau hoi co the ton nhieu
      lan goi model
-  5. Tran kich thuoc observation (ap trong tools/guard.py)
-  6. Nguoi dung bam dung
+  4. Tran kich thuoc observation (ap trong tools/guard.py)
+  5. Nguoi dung bam dung
+
+TRUOC DAY co chan thu sau: tran TONG SO loi goi cong cu. Da bo (08/09/2026).
+
+No khong chan them duoc gi that: so vong da chan so LUOT goi model — thu duy nhat
+ton tien dang ke — con deadline va ngan sach ngay chan phan con lai. Nhung no gay
+mot loi IM LANG: khi cham tran giua mot vong, doan cat `[: con_lai]` VUT BOT mot
+phan cac loi goi model vua xin, roi ghi vao lich su nhu the model chi xin bay
+nhieu. Model khong he biet minh bi cat, nen no tra loi nhu da co du du lieu.
+
+Do dung la dieu da xay ra khi test luong "top video nhieu like nhat": model xin
+tra 5 video mot luot, chi 3 cai duoc chay, va cau tra loi noi ve ca 5.
 """
 
 import re
@@ -85,7 +95,6 @@ class GenerateDeps:
     max_tokens: int
     effort: Effort
     max_iterations: int
-    max_tool_calls: int
     deadline_ms: int
     #: Nguoi dung bam dung. Kiem tra moi vong, giong ngan sach.
     should_stop: Callable[[], Awaitable[bool]] | None = None
@@ -160,10 +169,11 @@ async def generate(
             logger.info("nguoi dung dung vong ReAct", iteration=iteration)
             return _finish(last_text, logger, reason="user_stopped", iteration=iteration)
 
-        # Het luot goi cong cu thi van cho model noi not, nhung khong dua tool nua.
-        out_of_tool_calls = tool_calls_used >= deps.max_tool_calls
+        # Vong cuoi khong dua tool nua: model phai dung du lieu dang co ma noi not.
+        # Dua tool o vong cuoi la chac chan phi mot luot goi — ket qua tra ve se
+        # khong con vong nao de doc.
         last_iteration = iteration == deps.max_iterations
-        offer_tools = bool(specs) and not out_of_tool_calls and not last_iteration
+        offer_tools = bool(specs) and not last_iteration
 
         try:
             result = await deps.llm.reply(
@@ -189,7 +199,9 @@ async def generate(
             return Ok(result.text)
 
         # --- Co loi goi cong cu: Action ---
-        calls = result.tool_calls[: deps.max_tool_calls - tool_calls_used]
+        # Chay DU cac loi goi model xin. Cat bot o day la sua ngam y dinh cua model
+        # ma khong bao no biet.
+        calls = result.tool_calls
         tool_calls_used += len(calls)
 
         if deps.on_event is not None:

@@ -48,7 +48,7 @@ def make_deps(**over: Any) -> Deps:
         ),
         "bot_name": BOT,
         "reply": ReplyModel(max_tokens=16_000, effort="low"),
-        "react": ReactLimits(max_iterations=5, max_tool_calls=8, deadline_ms=60_000),
+        "react": ReactLimits(max_iterations=5, deadline_ms=60_000),
     }
     base.update(over)
     return Deps(**base)

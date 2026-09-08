@@ -32,6 +32,18 @@ from .container import build_deps
 MIGRATIONS_DIR = Path.cwd() / "db" / "migrations"
 
 
+def _buoc_stdout_utf8() -> None:
+    """Terminal Windows mac dinh la cp1252, ma moi cau tra loi deu co dau tieng Viet.
+
+    Khong co doan nay thi `cli chat` chay dung het duong ong roi NEM
+    UnicodeEncodeError ngay o buoc in — nghia la mat luon cau tra loi vua ton mot
+    luot API de lam ra.
+    """
+    for luong in (sys.stdout, sys.stderr):
+        if hasattr(luong, "reconfigure"):
+            luong.reconfigure(encoding="utf-8", errors="replace")
+
+
 class ConsoleChannel:
     """ChannelPort in ra terminal."""
 
@@ -340,6 +352,7 @@ async def review_command(args: list[str]) -> int:
 
 
 async def main() -> int:
+    _buoc_stdout_utf8()
     configure_logging()
     command = sys.argv[1] if len(sys.argv) > 1 else "chat"
 
