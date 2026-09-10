@@ -35,7 +35,7 @@ class TestBoCucNamKhoi:
         # Hai vi du 5-6 them 07/09/2026 sau khi do duoc vong hoi lai vo tan tren bot
         # that (docs/plan-thi-cong.md section 18). Vi du 1b them 08/09/2026 khi mo
         # luong RAG-truoc-web-sau.
-        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 7
+        assert len(re.findall(r"Ví dụ \d+", SYSTEM_PROMPT)) == 9
 
     def test_day_ca_hai_nhanh_khi_tai_lieu_KHONG_co(self) -> None:
         """Hai nhanh co gia rat khac nhau, nen prompt phai day ca hai.
@@ -46,7 +46,7 @@ class TestBoCucNamKhoi:
         """
         assert "Ví dụ 1b" in SYSTEM_PROMPT
         assert "không tra web" in SYSTEM_PROMPT
-        assert "tra ngoài" in SYSTEM_PROMPT
+        assert "lấy từ web" in SYSTEM_PROMPT
 
 
 class TestLuatAnToan:
@@ -69,10 +69,10 @@ class TestLuatAnToan:
 
 class TestRangBuocDauRa:
     def test_cam_markdown_tuong_minh(self) -> None:
-        assert "KHÔNG dùng markdown" in SYSTEM_PROMPT
+        assert "KHÔNG markdown" in SYSTEM_PROMPT
 
     def test_bat_buoc_trich_nguon(self) -> None:
-        assert "phải nêu nguồn" in SYSTEM_PROMPT
+        assert "Nêu nguồn MỘT LẦN" in SYSTEM_PROMPT
 
     def test_KHONG_yeu_cau_viet_ra_tung_buoc_suy_luan(self) -> None:
         # gpt-5-mini da suy luan noi bo va tinh tien theo gia output. Bat viet ra nua
@@ -121,7 +121,7 @@ class TestDongBoVoiBotMentionName:
 
     def test_cam_bot_tu_nghi_ra_ten_goi_tat_khac(self) -> None:
         # Model tung tu bia ra 'bot' lam ten goi tat — go '@bot' vao nhom khong khop.
-        assert "Không tự nghĩ ra tên gọi tắt khác" in SYSTEM_PROMPT
+        assert "tự nghĩ ra tên gọi tắt khác" in SYSTEM_PROMPT
 
     def test_prompt_KHONG_khang_dinh_mot_con_so_ten_co_dinh(self) -> None:
         """"hai cach duy nhat" da tung sai ngay khi them alias thu ba.
@@ -153,3 +153,79 @@ class TestInstructionPrompt:
         # Thieu dong nay thi model tra ve kem loi dan, va cho goi phai tu boc chuoi.
         for route, text in INSTRUCTIONS.items():
             assert re.search(r"Chỉ xuất ra|xuất ra đúng", text), route
+
+
+class TestGiongTraLoi:
+    """Giong tra loi — do tren bot that ngay 09/09/2026 truoc khi sua.
+
+    Sau dau hieu may moc, moi cai truy duoc ve dung mot luat trong bang nay:
+
+        cai gi cung thanh danh sach danh so   4/6 luot   <- "Danh so 1. 2. 3."
+        trich dan lap 4 lan trong 6 dong      bun cha    <- "moi khang dinh mang nguon rieng"
+        mo dau "Minh + dong tu"               5/6 luot   <- "neu gia dinh o dau"
+        ke viec sap lam                       3/6 luot   <- vi du 1b, 3 lam mau
+        ket bang loi moi chao                 3/6 luot   <- luat chi cam moi chao RONG
+        chao hoi nhu tong dai                 1/1        <- khong co luat cho noi chuyen thuong
+    """
+
+    def test_bat_cau_dau_tien_la_NOI_DUNG(self) -> None:
+        """Dau hieu may moc ro nhat: 5/6 luot mo dau bang "Minh + dong tu"."""
+        # Luat nay nam trong OUTPUT FORMAT chu khong trong CONSTRAINTS: khoi cuoi
+        # cung truoc phan vi du, tuc gan cho sinh cau tra loi nhat.
+        assert "Câu ĐẦU không được là lời dẫn" in SYSTEM_PROMPT
+        assert "Mình tóm tắt" in SYSTEM_PROMPT  # neu ro mau xau de model nhan ra
+
+    def test_van_xuoi_la_MAC_DINH_khong_phai_danh_sach(self) -> None:
+        """Luat cu chi noi CACH danh so, khong noi KHI NAO nen danh so — nen model
+        danh so moi thu, ke ca cau hoi mot y.
+        """
+        assert "Mặc định là VĂN XUÔI" in SYSTEM_PROMPT
+
+    def test_nguon_neu_MOT_LAN_khong_lap_tung_dong(self) -> None:
+        """Van giu tinh kiem chung: van phai co nguon, chi bo phan LAP."""
+        assert "Nêu nguồn MỘT LẦN" in SYSTEM_PROMPT
+        assert "trộn NHIỀU nguồn" in SYSTEM_PROMPT
+
+    def test_cam_ca_loi_moi_chao_CU_THE(self) -> None:
+        """Luat cu chi cam moi chao RONG ("Ban can gi nua khong?"), nen model lach
+        bang mot loi moi CU THE ("Muon minh gui cach nau tung buoc khong?") —
+        van la mot cau thua o cuoi moi luot.
+        """
+        assert "Hết ý thì DỪNG" in SYSTEM_PROMPT
+        # Bat ca dang NGUY TRANG: model lach lenh cam bang cau khang dinh
+        # ("neu ban muon chi tiet thi noi minh biet") thay vi cau hoi.
+        assert "câu hỏi hay câu khẳng định" in SYSTEM_PROMPT
+
+    def test_co_luat_cho_NOI_CHUYEN_THUONG(self) -> None:
+        """Truoc day khong co luat nao, nen "chao ban" nhan lai mot cau tong dai:
+        "Minh la CP Assistant (goi tat CP). Minh giup duoc gi cho ban hom nay?"
+        """
+        assert "nói chuyện thường" in SYSTEM_PROMPT
+        assert "không mời chào dịch vụ" in SYSTEM_PROMPT
+
+    def test_co_TRAN_DO_DAI_cung(self) -> None:
+        """Hoi quy that: ban viet lai dau tien thay tran cung "duoi 4-5 cau" bang mot
+        cau mem ("hoi ngan thi dap ngan"). Cau tra loi phinh tu ~570 len ~2.500 ky tu.
+        Tran phai la mot CON SO kiem duoc, khong phai mot loi khuyen.
+        """
+        assert "TỐI ĐA 5 CÂU" in SYSTEM_PROMPT
+
+    def test_vi_du_KHONG_tu_mau_thuan_voi_luat(self) -> None:
+        """Vi du 3 tung mo dau bang "Minh lay 5 bai moi nhat..." — dung cai mo dau ma
+        luat ngay tren no vua cam. Vi du thang luat, nen bot van mo dau kieu do.
+        """
+        import re as _re
+
+        khoi_vi_du = SYSTEM_PROMPT.split("# VÍ DỤ", 1)[1]
+        for dong in khoi_vi_du.splitlines():
+            if dong.startswith("Trợ lý:"):
+                assert not _re.match(
+                    r"Trợ lý:\s*Mình (tóm tắt|lấy|liệt kê|so sánh|làm theo)", dong
+                ), dong
+
+    def test_co_vi_du_day_giong_chu_khong_chi_day_luat(self) -> None:
+        """Do that cho thay VI DU day giong manh hon LUAT: sau dau hieu may moc thi
+        ba cai den truc tiep tu hinh dang cua cac vi du cu.
+        """
+        assert "hôm nay mình mệt quá" in SYSTEM_PROMPT  # vi du noi chuyen thuong
+        assert "Postgres hay MongoDB" in SYSTEM_PROMPT  # vi du tra loi bang van xuoi

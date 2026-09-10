@@ -38,7 +38,17 @@ TOKEN_BUDGET: dict[BudgetLayer, int] = {
     # Prompt dai them ~800 token, nhung `cli stats` cho thay 85% luot doc duoc
     # cache, va input duoc cache tinh $0,025/1M — tuc phan them chi ton them
     # khoang $0,00002 moi cau. Doi lai la bon rui ro co luat thanh van.
-    "system": 3_200,
+    #
+    # Noi 3200 -> 3600 (09/09/2026) cho phan thiet ke lai GIONG TRA LOI. Phan lon
+    # chi phi la ba vi du moi (1b viet lai, 7, 8) — va do la co y: do tren bot that
+    # cho thay VI DU day giong manh hon LUAT. Bot dang mo dau 5/6 luot bang "Minh +
+    # dong tu", bien 4/6 cau tra loi thanh danh sach danh so, va lap trich dan bon
+    # lan trong sau dong; ba dau hieu do deu do vi du cu lam mau.
+    #
+    # Da CAT 115 token trung lap truoc khi noi tran (gop luat hoi lai, gon khoi ten
+    # goi tat, bo mot ban sao cua luat "di thang vao cau tra loi"). Noi tran ma khong
+    # cat truoc la cach prompt phinh ra tung dot ma khong ai chiu trach nhiem.
+    "system": 3_600,
     "knowledge": 20_000,
     "facts": 4_000,
     "summary": 4_000,

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from infra.logger import get_logger
 
-from .clean import Trang, ghep, lam_sach
+from .clean import Trang, _la_tieu_de_hoa, ghep, lam_sach, va_chu_vo
 from .profiles import ap_sua_ky_tu, nhan_dien
 
 _log = get_logger()
@@ -111,10 +111,27 @@ def _bao_cao_suc_khoe(text: str, path: Path) -> None:
 
 
 def _trang_pdf(path: Path) -> list[str]:
+    """Doc mac dinh, va CHI doc lai kieu `layout` cho trang co tieu de bi vo.
+
+    Doc lai ca tep bang `layout` thi ton gap doi thoi gian trich xuat de sua vai
+    dong; do that tren booklet Sa Pa thi 4/46 trang can toi no.
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
-    return [(page.extract_text() or "").strip() for page in reader.pages]
+    trang: list[str] = []
+    for so, page in enumerate(reader.pages):
+        van_ban = (page.extract_text() or "").strip()
+        if any(_la_tieu_de_hoa(d) for d in van_ban.split("\n")):
+            try:
+                van_ban = va_chu_vo(van_ban, page.extract_text(extraction_mode="layout") or "")
+            except Exception as error:
+                # Che do layout hong o mot trang khong duoc lam hong ca lan nap:
+                # ban mac dinh van dung, chi la tieu de con vo.
+                _log.warning("khong doc duoc ban layout, giu ban mac dinh",
+                             path=str(path), trang=so, err=str(error))
+        trang.append(van_ban)
+    return trang
 
 
 def _from_docx(path: Path) -> str:

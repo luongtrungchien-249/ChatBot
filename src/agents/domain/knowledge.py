@@ -22,3 +22,14 @@ class RetrievedChunk:
     content: str
     #: Diem cua buoc rerank, sau khi da loc theo RERANK_MIN_SCORE.
     score: float
+    #: Khoang cach cosine tu cau truy van toi doan nay. CANG NHO CANG GIONG.
+    #:
+    #: Co mat o day de cho goi biet lan tim nay CHAC hay CHUNG CHUNG — xem
+    #: `tools/knowledge_search.py`. Diem rerank khong thay duoc viec nay: o che do
+    #: du phong (LexicalOverlapReranker) diem la ti le tu trung, khong phai do lien
+    #: quan, nen no khong so duoc voi mot nguong co dinh. Khoang cach cosine thi
+    #: co hieu chuan ngu nghia trong CA HAI che do rerank.
+    #:
+    #: None khi khong tinh duoc. Cho goi phai coi None la "khong biet", va khong
+    #: duoc suy ra "chac" hay "khong chac" tu no.
+    distance: float | None = None

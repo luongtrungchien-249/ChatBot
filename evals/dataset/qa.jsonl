@@ -1,25 +1,25 @@
-{"id": "q001", "question": "What ingredients are needed for 1000monkeys’ “Allon Kohns”?", "answer": "Cac nguyen lieu liet ke trong muc '1000monkeys’ “Allon Kohns”'.", "expected_chunk_ids": ["1408"]}
-{"id": "q002", "question": "What ingredients are needed for Andrew’s Macaroni with Bacon & Green Onion?", "answer": "Cac nguyen lieu liet ke trong muc 'Andrew’s Macaroni with Bacon & Green Onion'.", "expected_chunk_ids": ["1403"]}
-{"id": "q003", "question": "What ingredients are needed for Andy’s Lazy Bachelor Vegetable Bean Soup?", "answer": "Cac nguyen lieu liet ke trong muc 'Andy’s Lazy Bachelor Vegetable Bean Soup'.", "expected_chunk_ids": ["1377"]}
-{"id": "q004", "question": "What ingredients are needed for Anna’s Easy Chinese Salad?", "answer": "Cac nguyen lieu liet ke trong muc 'Anna’s Easy Chinese Salad'.", "expected_chunk_ids": ["1402"]}
-{"id": "q005", "question": "What ingredients are needed for BANANA / FLO W ER SALAD?", "answer": "Cac nguyen lieu liet ke trong muc 'BANANA / FLO W ER SALAD'.", "expected_chunk_ids": ["1483"]}
-{"id": "q006", "question": "What ingredients are needed for BANANA CHIPS?", "answer": "Cac nguyen lieu liet ke trong muc 'BANANA CHIPS'.", "expected_chunk_ids": ["1480"]}
-{"id": "q007", "question": "What ingredients are needed for BO I LED / TARO?", "answer": "Cac nguyen lieu liet ke trong muc 'BO I LED / TARO'.", "expected_chunk_ids": ["1492"]}
-{"id": "q008", "question": "What ingredients are needed for BOILED H’MONG / MUSTARD GREENS?", "answer": "Cac nguyen lieu liet ke trong muc 'BOILED H’MONG / MUSTARD GREENS'.", "expected_chunk_ids": ["1473"]}
-{"id": "q009", "question": "What ingredients are needed for BRAI SED SNAI LS / W I TH BANANA / AND TO FU?", "answer": "Cac nguyen lieu liet ke trong muc 'BRAI SED SNAI LS / W I TH BANANA / AND TO FU'.", "expected_chunk_ids": ["1485", "1486"]}
-{"id": "q010", "question": "What ingredients are needed for Bevan’s Nachos?", "answer": "Cac nguyen lieu liet ke trong muc 'Bevan’s Nachos'.", "expected_chunk_ids": ["1394"]}
-{"id": "q011", "question": "What ingredients are needed for Brendan’s Black Siberian?", "answer": "Cac nguyen lieu liet ke trong muc 'Brendan’s Black Siberian'.", "expected_chunk_ids": ["1410", "1411"]}
-{"id": "q012", "question": "What ingredients are needed for Brody’s Ancho Pork Chops?", "answer": "Cac nguyen lieu liet ke trong muc 'Brody’s Ancho Pork Chops'.", "expected_chunk_ids": ["1414"]}
-{"id": "q013", "question": "What ingredients are needed for BÁNH KHOAI / SỌ HẤP?", "answer": "Cac nguyen lieu liet ke trong muc 'BÁNH KHOAI / SỌ HẤP'.", "expected_chunk_ids": ["1495"]}
-{"id": "q014", "question": "What ingredients are needed for BÍ ĐỎ / PUMPKIN?", "answer": "Cac nguyen lieu liet ke trong muc 'BÍ ĐỎ / PUMPKIN'.", "expected_chunk_ids": ["1464"]}
-{"id": "q015", "question": "What ingredients are needed for BÍ ĐỎ NON XÀO / THỊT BÒ?", "answer": "Cac nguyen lieu liet ke trong muc 'BÍ ĐỎ NON XÀO / THỊT BÒ'.", "expected_chunk_ids": ["1471"]}
-{"id": "q016", "question": "What ingredients are needed for CANH CHUỐI XANH / HẦM XƯƠNG?", "answer": "Cac nguyen lieu liet ke trong muc 'CANH CHUỐI XANH / HẦM XƯƠNG'.", "expected_chunk_ids": ["1488"]}
-{"id": "q017", "question": "What ingredients are needed for CANH KHOAI SỌ / CẢI MÈO?", "answer": "Cac nguyen lieu liet ke trong muc 'CANH KHOAI SỌ / CẢI MÈO'.", "expected_chunk_ids": ["1497"]}
-{"id": "q018", "question": "What ingredients are needed for CHUỐI / BANANA?", "answer": "Cac nguyen lieu liet ke trong muc 'CHUỐI / BANANA'.", "expected_chunk_ids": ["1479"]}
-{"id": "q019", "question": "What ingredients are needed for Callamon’s Tuna Casserole?", "answer": "Cac nguyen lieu liet ke trong muc 'Callamon’s Tuna Casserole'.", "expected_chunk_ids": ["1361"]}
-{"id": "q020", "question": "What ingredients are needed for Cameron’s Spice Stew?", "answer": "Cac nguyen lieu liet ke trong muc 'Cameron’s Spice Stew'.", "expected_chunk_ids": ["1416", "1417", "1418", "1419", "1420", "1421", "1422", "1423", "1424", "1425", "1426", "1427", "1428", "1429", "1430", "1431", "1432", "1433", "1434", "1435", "1436", "1437", "1438", "1439", "1440", "1441", "1442", "1443", "1444", "1445", "1446", "1447", "1448", "1449", "1450"]}
-{"id": "q021", "question": "What ingredients are needed for CÁ K H O TH ÂN / CH UỐI NO N?", "answer": "Cac nguyen lieu liet ke trong muc 'CÁ K H O TH ÂN / CH UỐI NO N'.", "expected_chunk_ids": ["1490"]}
-{"id": "q022", "question": "What ingredients are needed for CẢI MÈO / H’MONG MUSTARD GREENS?", "answer": "Cac nguyen lieu liet ke trong muc 'CẢI MÈO / H’MONG MUSTARD GREENS'.", "expected_chunk_ids": ["1472"]}
+{"id": "q001", "question": "What ingredients are needed for 1000monkeys’ “Allon Kohns”?", "answer": "Cac nguyen lieu liet ke trong muc '1000monkeys’ “Allon Kohns”'.", "expected_chunk_ids": ["1681"]}
+{"id": "q002", "question": "What ingredients are needed for Andrew’s Macaroni with Bacon & Green Onion?", "answer": "Cac nguyen lieu liet ke trong muc 'Andrew’s Macaroni with Bacon & Green Onion'.", "expected_chunk_ids": ["1676"]}
+{"id": "q003", "question": "What ingredients are needed for Andy’s Lazy Bachelor Vegetable Bean Soup?", "answer": "Cac nguyen lieu liet ke trong muc 'Andy’s Lazy Bachelor Vegetable Bean Soup'.", "expected_chunk_ids": ["1650"]}
+{"id": "q004", "question": "What ingredients are needed for Anna’s Easy Chinese Salad?", "answer": "Cac nguyen lieu liet ke trong muc 'Anna’s Easy Chinese Salad'.", "expected_chunk_ids": ["1675"]}
+{"id": "q005", "question": "What ingredients are needed for BANANA / FLOWER SALAD?", "answer": "Cac nguyen lieu liet ke trong muc 'BANANA / FLO W ER SALAD'.", "expected_chunk_ids": ["1577"]}
+{"id": "q006", "question": "What ingredients are needed for BANANA CHIPS?", "answer": "Cac nguyen lieu liet ke trong muc 'BANANA CHIPS'.", "expected_chunk_ids": ["1574"]}
+{"id": "q007", "question": "What ingredients are needed for BOILED / TARO?", "answer": "Cac nguyen lieu liet ke trong muc 'BO I LED / TARO'.", "expected_chunk_ids": ["1586"]}
+{"id": "q008", "question": "What ingredients are needed for BOILED H’MONG / MUSTARD GREENS?", "answer": "Cac nguyen lieu liet ke trong muc 'BOILED H’MONG / MUSTARD GREENS'.", "expected_chunk_ids": ["1567"]}
+{"id": "q009", "question": "What ingredients are needed for BRAISED SNAILS / WITH BANANA / AND TOFU?", "answer": "Cac nguyen lieu liet ke trong muc 'BRAI SED SNAI LS / W I TH BANANA / AND TO FU'.", "expected_chunk_ids": ["1579", "1580"]}
+{"id": "q010", "question": "What ingredients are needed for Bevan’s Nachos?", "answer": "Cac nguyen lieu liet ke trong muc 'Bevan’s Nachos'.", "expected_chunk_ids": ["1667"]}
+{"id": "q011", "question": "What ingredients are needed for Brendan’s Black Siberian?", "answer": "Cac nguyen lieu liet ke trong muc 'Brendan’s Black Siberian'.", "expected_chunk_ids": ["1683", "1683"]}
+{"id": "q012", "question": "What ingredients are needed for Brody’s Ancho Pork Chops?", "answer": "Cac nguyen lieu liet ke trong muc 'Brody’s Ancho Pork Chops'.", "expected_chunk_ids": ["1687"]}
+{"id": "q013", "question": "What ingredients are needed for BÁNH KHOAI / SỌ HẤP?", "answer": "Cac nguyen lieu liet ke trong muc 'BÁNH KHOAI / SỌ HẤP'.", "expected_chunk_ids": ["1589"]}
+{"id": "q014", "question": "Which plant family do pumpkins belong to, and which antioxidants do they contain?", "answer": "Ho Cucurbitaceae; chua alpha-carotene va beta-carotene.", "expected_chunk_ids": ["1558"]}
+{"id": "q015", "question": "What ingredients are needed for BÍ ĐỎ NON XÀO / THỊT BÒ?", "answer": "Cac nguyen lieu liet ke trong muc 'BÍ ĐỎ NON XÀO / THỊT BÒ'.", "expected_chunk_ids": ["1565"]}
+{"id": "q016", "question": "What ingredients are needed for CANH CHUỐI XANH / HẦM XƯƠNG?", "answer": "Cac nguyen lieu liet ke trong muc 'CANH CHUỐI XANH / HẦM XƯƠNG'.", "expected_chunk_ids": ["1582"]}
+{"id": "q017", "question": "What ingredients are needed for CANH KHOAI SỌ / CẢI MÈO?", "answer": "Cac nguyen lieu liet ke trong muc 'CANH KHOAI SỌ / CẢI MÈO'.", "expected_chunk_ids": ["1591"]}
+{"id": "q018", "question": "Which plant family does the banana belong to, and which nutrients does it provide?", "answer": "Ho Musaceae; cung cap chat xo, kali, vitamin B6 va vitamin C.", "expected_chunk_ids": ["1573"]}
+{"id": "q019", "question": "What ingredients are needed for Callamon’s Tuna Casserole?", "answer": "Cac nguyen lieu liet ke trong muc 'Callamon’s Tuna Casserole'.", "expected_chunk_ids": ["1634"]}
+{"id": "q020", "question": "What equipment and ingredients are needed for Cameron's Spice Stew?", "answer": "Noi lon (stockpot), mot coc ca phe, thia lon; kem danh sach nguyen lieu cua mon.", "expected_chunk_ids": ["1689"]}
+{"id": "q021", "question": "What ingredients are needed for CÁ KHO THÂN / CHUỐI NON?", "answer": "Cac nguyen lieu liet ke trong muc 'CÁ K H O TH ÂN / CH UỐI NO N'.", "expected_chunk_ids": ["1584"]}
+{"id": "q022", "question": "What ingredients are needed for CẢI MÈO / H’MONG MUSTARD GREENS?", "answer": "Cac nguyen lieu liet ke trong muc 'CẢI MÈO / H’MONG MUSTARD GREENS'.", "expected_chunk_ids": ["1566"]}
 {"id": "q023", "question": "What is the refund policy for enterprise customers?", "answer": "Tai lieu hien co khong de cap.", "expected_chunk_ids": []}
 {"id": "q024", "question": "How do I configure Kubernetes ingress?", "answer": "Tai lieu hien co khong de cap.", "expected_chunk_ids": []}
 {"id": "q025", "question": "Chinh sach nghi phep nam cua cong ty quy dinh the nao?", "answer": "Tai lieu hien co khong de cap.", "expected_chunk_ids": []}

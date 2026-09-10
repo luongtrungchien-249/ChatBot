@@ -145,7 +145,62 @@ def _split_by_profile(text: str, ho_so: HoSo) -> list[_Section]:
             )
         )
         cho = []
-    return sections
+    return _chan_muc_qua_dai(sections)
+
+
+#: Mot muc duoc phep trai dai toi da may chunk truoc khi ta thoi tin cai ten cua no.
+#:
+#: Moc lap cua ho so danh dau cho BAT DAU cua mot muc, khong danh dau cho KET THUC.
+#: Nen muc cuoi cung an het phan duoi tai lieu, va phan duoi tai lieu thuong khong
+#: phai cong thuc nua: cookbook tieng Anh het cong thuc o trang 67 roi chuyen sang
+#: bai tham khao (`All About Chocolate`, `Spice Guide`, `Toys, Stuff, and Other
+#: Thingies`) — nhung bai do khong mang byline `... from the ... dept.` nen khong
+#: sinh moc moi.
+#:
+#: Hau qua do duoc 10/09/2026: `Cameron s Spice Stew` mang 35 chunk, tuc 20% ca kho,
+#: trong khi moi muc khac <= 5. Bot trich kien thuc bao quan so co la kem "mục
+#: Cameron s Spice Stew" — mot cai nhan SAI, va nhan do di thang vao trich dan lan
+#: vao danh sach ung vien ma cong cu dua cho nguoi dung chon.
+#:
+#: Do dai than muc, do tren ca hai tai lieu that:
+#:
+#:     cookbook tieng Anh   trung vi 1.172   p90 3.352   lon nhat THAT 8.995
+#:     booklet Sa Pa        trung vi 1.057   p90 2.646   lon nhat THAT 5.230
+#:     Cameron s Spice Stew                              62.482   <- gap 53 lan trung vi
+#:
+#: 5 chunk = 12.600 ky tu: bo lot muc hop le dai nhat (8.995) mot cach thoai mai, va
+#: cat dung mot ca benh. Vuot tran thi phan du KHONG bi vut di — no thanh mot muc
+#: KHONG TEN. "Khong biet muc nao" la mot cau tra loi trung thuc; "Cameron s Spice
+#: Stew" thi khong.
+_TRAN_MUC_CHUNKS = 5
+
+
+def _chan_muc_qua_dai(sections: list[_Section]) -> list[_Section]:
+    """Muc dai bat thuong thi CHI phan dau duoc giu ten."""
+    tran = _TRAN_MUC_CHUNKS * TARGET_CHARS
+    ra: list[_Section] = []
+    for muc in sections:
+        if muc.path is None or len(muc.body) <= tran:
+            ra.append(muc)
+            continue
+
+        cat = muc.body.rfind("\n\n", 0, tran)
+        if cat <= 0:
+            cat = muc.body.rfind("\n", 0, tran)
+        if cat <= 0:
+            cat = tran
+
+        con_lai = muc.body[cat:].strip()
+        ra.append(_Section(path=muc.path, body=muc.body[:cat].strip(), bat_dau=muc.bat_dau))
+        if con_lai:
+            ra.append(
+                _Section(
+                    path=None,
+                    body=con_lai,
+                    bat_dau=muc.bat_dau + muc.body.index(con_lai, cat),
+                )
+            )
+    return ra
 
 
 def _with_overlap(pieces: list[str]) -> list[str]:

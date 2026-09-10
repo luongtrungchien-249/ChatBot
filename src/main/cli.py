@@ -187,11 +187,15 @@ async def memory_dump(args: list[str]) -> int:
 
 
 async def ingest_command(args: list[str]) -> int:
-    """`ingest [--kiem-tra] <duong-dan> [ten hien thi]` — nap tai lieu vao knowledge base.
+    """`ingest [--kiem-tra] [--nap-lai] <duong-dan> [ten hien thi]` — nap tai lieu.
 
     CHI ADMIN. Cuong che bang chinh cho dat lenh nay: khong co route HTTP nao goi
     toi ingest_file(), nen ai chay duoc lenh tren may chu thi moi nap duoc.
     Moi lan nap ghi lai nguoi nap vao kb_document.ingested_by (master-plan 3.4).
+
+    `--nap-lai` ep nap lai du van ban khong doi. Checksum chi biet VAN BAN co doi
+    khong; no khong biet CACH CAT co doi khong. Nen sau khi sua chunk.py hay clean.py
+    ma tep khong doi thi phai co co nay, neu khong ban vá se nam yen trong ma nguon.
 
     `--kiem-tra` chay KHO: trich xuat, lam sach, cat chunk roi in bao cao chat luong
     ma KHONG ghi mot dong nao vao CSDL va khong goi mot API nao. Chay no TRUOC khi nap
@@ -199,10 +203,16 @@ async def ingest_command(args: list[str]) -> int:
     sach hay cach cat deu keo theo mot lan nap lai.
     """
     chi_kiem_tra = "--kiem-tra" in args
-    args = [a for a in args if a != "--kiem-tra"]
+    # Ep nap lai du van ban khong doi. Dung khi doi LUAT CAT hay LUAT LAM SACH:
+    # checksum chi nhin van ban, no khong nhin cach ta xu ly van ban do.
+    ep = "--nap-lai" in args
+    args = [a for a in args if a not in ("--kiem-tra", "--nap-lai")]
 
     if not args:
-        print("Dung: ingest [--kiem-tra] <duong-dan> [ten hien thi]", file=sys.stderr)
+        print(
+            "Dung: ingest [--kiem-tra] [--nap-lai] <duong-dan> [ten hien thi]",
+            file=sys.stderr,
+        )
         print(f"Duoi ho tro: {', '.join(SUPPORTED)}", file=sys.stderr)
         return 1
 
@@ -227,7 +237,9 @@ async def ingest_command(args: list[str]) -> int:
     # nen lay ten dang nhap he dieu hanh — du de truy khi can, va trung thuc ve viec
     # no khong phai mot danh tinh da xac thuc.
     try:
-        result = await ingest_file(path, ingested_by=f"cli:{getpass.getuser()}", title=title)
+        result = await ingest_file(
+            path, ingested_by=f"cli:{getpass.getuser()}", title=title, ep=ep
+        )
     except (UnsupportedDocumentError, ValueError) as error:
         print(f"Khong nap duoc: {error}", file=sys.stderr)
         return 1
