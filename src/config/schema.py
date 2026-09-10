@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     # Mau nho (17 cau) — do lai moi khi corpus doi.
     RAG_MAX_DISTANCE: float = Field(default=0.63, gt=0.0, le=2.0)
 
+    # Tren nguong nay thi lan tim bi coi la CHUNG CHUNG, va cong cu tra ve mot danh
+    # sach ung vien de NGUOI DUNG chon thay vi tra loi luon. Xem tools/knowledge_search.
+    #
+    # Do 10/09/2026 tren kho that (179 chunk), khoang cach cua ung vien gan nhat:
+    #
+    #   hoi thang mot muc co ten     0,2468  0,2613  0,2810  0,3499
+    #   hoi chung chung / mo ho      0,3504  0,4658  0,5061  0,5629  0,5625  0,5960
+    #
+    # Hai lop CHONG NHAU o quanh 0,35, nen 0,35 la cho dat nguong te nhat. Chon 0,50:
+    # no nam trong khoang trong 0,466 - 0,506 cua mau nay, va no giu nguyen hai cau
+    # dang tra loi DUNG (0,3504 va 0,4658) trong khi van bat duoc "dishes that use
+    # cheese and pasta" (0,5625) — dung cau da truot vi truy van bi khai quat hoa.
+    #
+    # Dat CAO hon RAG_MAX_DISTANCE thi tinh nang tat: moi thu qua duoc cua loc kia
+    # deu duoi nguong nay. Mau nho — do lai khi corpus doi, y het RAG_MAX_DISTANCE.
+    RAG_HOI_LAI_TU: float = Field(default=0.50, gt=0.0, le=2.0)
+
     RERANK_MIN_SCORE: float = Field(ge=0, le=1)
 
     # --- Ha tang ---

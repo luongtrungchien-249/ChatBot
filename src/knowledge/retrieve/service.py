@@ -163,6 +163,9 @@ def _to_chunk(row: ChunkRow, score: float) -> RetrievedChunk:
         page=row.page,
         content=row.content,
         score=score,
+        # Di kem ra ngoai chu khong dung o day roi vut di: cong cu can no de biet
+        # lan tim nay co CHAC khong. Xem RetrievedChunk.distance.
+        distance=row.distance,
     )
 
 
