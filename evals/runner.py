@@ -213,8 +213,35 @@ async def main() -> int:
     try:
         # Tuan tu, khong gather: chay song song lam so do do tre vo nghia, ma do tre
         # la mot trong ba nguong.
-        outcomes = [await run_one(row) for row in rows]
-        return EXIT_DAT if report(outcomes) else EXIT_TRUOT
+        #
+        # MOT cau hong khong duoc vut ca luot chay. Do that 10/09/2026: hai lan chay
+        # lien tiep deu chet o mot `APITimeoutError` giua chung, va ca hai lan deu mat
+        # sach ket qua cua nhung cau da chay xong — tuc da tra tien cho chung roi ma
+        # khong doc duoc gi. Voi mot job nightly thi do la kieu hong te nhat: no chi
+        # can mot lan mang chap la khong bao gio co so lieu.
+        #
+        # Cau hong duoc GHI RA va DEM RIENG, khong lang le cham 0: cham 0 se keo trung
+        # binh xuong vi mot su co ha tang va bien no thanh mot van de chat luong gia.
+        outcomes: list[Outcome] = []
+        hong: list[tuple[str, str]] = []
+        for row in rows:
+            try:
+                outcomes.append(await run_one(row))
+            except Exception as error:
+                hong.append((row.id, f"{type(error).__name__}: {error}"))
+                _log.error("cau eval that bai, bo qua", cau=row.id, err=str(error))
+
+        if not outcomes:
+            print("Moi cau deu that bai — xem log.", file=sys.stderr)
+            return EXIT_TRUOT
+
+        dat = report(outcomes)
+        if hong:
+            print(chr(10) + f"KHONG CHAY DUOC {len(hong)}/{len(rows)} cau:")
+            for cau, loi in hong:
+                print(f"  [{cau}] {loi}")
+            print("  (su co ha tang, KHONG tinh vao ba chi so tren)")
+        return EXIT_DAT if dat else EXIT_TRUOT
     finally:
         await close_db()
         await close_redis()
