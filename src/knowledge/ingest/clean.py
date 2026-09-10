@@ -273,3 +273,110 @@ def trang_cua(ban_do: Sequence[tuple[int, int | None]], vi_tri: int) -> int | No
             break
         ket_qua = so
     return ket_qua
+
+
+# --------------------------------------------------------------------------------
+# 5. Chu vo trong tieu de trinh bay
+# --------------------------------------------------------------------------------
+#
+# Tieu de dat co gian chu trong PDF bi pypdf tach thanh tung chu cai roi:
+#
+#     'Ố C O M'          <- 'ỐC OM'
+#     'CÁ K H O  TH ÂN'  <- 'CÁ KHO THÂN'
+#     'BRAI SED SNAI LS' <- 'BRAISED SNAILS'
+#
+# Han qua KHONG chi la xau ma. `section` di vao trich dan ("theo ..., mục Ố C O M"),
+# di vao danh sach ung vien ma cong cu dua cho NGUOI DUNG chon, va di vao ca `tsv`.
+# Doan than bai thi khong he hong — chi rieng dong tieu de.
+#
+# KHONG doan lai cho ngat tu. Khong co tu dien thi 'Ố C O M' co the la 'ỐCOM', 'Ố COM'
+# hay 'ỐC OM' — doan la bia. Thay vao do doc DUNG trang do mot lan nua bang
+# `extraction_mode='layout'`, che do giu bo cuc va KHONG lam vo tieu de:
+#
+#     so dong bi vo tren booklet Sa Pa:  mac dinh 7   ·   layout 0
+#
+# Vay sao khong dung layout cho tat ca? Vi no dan HAI COT song ngu vao chung mot dong
+# ('MỨT  CHUỐI          BANANA  CHIPS'), tuc than bai tieng Viet va tieng Anh dinh
+# vao nhau — te hon han ban mac dinh. Nen lay dung thu can: mac dinh cho than bai,
+# layout chi de MUON lai dong tieu de.
+#
+# Luat HEP, y het cac luat khac trong file nay: chi dung vao dong da bi nhan dien la
+# vo, va chi khi tim duoc mot doan trong ban layout co DUNG day ky tu do. Khong tim
+# duoc thi giu nguyen ban goc — trang 5 ('P R E F A C E MỞ  ĐẦU') roi vao dien nay va
+# no duoc de yen.
+
+
+def _la_tieu_de_hoa(dong: str) -> bool:
+    """Dong nay co phai TIEU DE viet hoa khong.
+
+    Chu vo chi xay ra o tieu de dat co gian chu, va tieu de trong ca hai tai lieu
+    deu viet hoa. Loc theo chu hoa TRUOC khi doc lai ban layout: khong loc thi
+    cookbook tieng Anh bat ta doc lai ca 88 trang de sua vai dong tieu de.
+    """
+    chu = [k for k in dong if k.isalpha()]
+    if len(chu) < 4:
+        return False
+    return sum(1 for k in chu if k.isupper()) >= len(chu) * 0.8
+
+
+def _so_manh(dong: str) -> int:
+    return len(dong.split())
+
+
+def _cat_cua_so(dong: str, dau: int, dai: int) -> str:
+    """Lay lai doan van ban ung voi [dau, dau+dai) ky tu KHONG PHAI khoang trang."""
+    ra: list[str] = []
+    dem = 0
+    for ky_tu in dong:
+        if ky_tu.isspace():
+            if dau <= dem < dau + dai and ra:
+                ra.append(" ")
+            continue
+        if dem >= dau + dai:
+            break
+        if dem >= dau:
+            ra.append(ky_tu)
+        dem += 1
+    return re.sub(r"\s+", " ", "".join(ra)).strip()
+
+
+def _ban_lanh(khoa: str, dong_layout: Sequence[str]) -> str | None:
+    """Tim trong ban layout mot doan co DUNG day ky tu `khoa` (da bo khoang trang)."""
+    for dong in dong_layout:
+        gon = re.sub(r"\s+", "", dong)
+        vi_tri = gon.find(khoa)
+        if vi_tri < 0:
+            continue
+        return _cat_cua_so(dong, vi_tri, len(khoa))
+    return None
+
+
+def va_chu_vo(mac_dinh: str, layout: str) -> str:
+    """Muon dong tieu de tu ban `layout` de vá dong bi vo trong ban mac dinh.
+
+    Hai ban la HAI LAN DOC CUNG MOT TRANG, nen day ky tu phai trung nhau; chi khac
+    cho dat khoang trang. Doi hoi trung TUYET DOI chinh la thu lam luat nay an toan:
+    khong khop thi khong dung toi.
+
+    Tieu chi nhan: ban layout co IT CHO NGAT hon tren cung day ky tu. Do la dinh
+    nghia truc tiep cua "it vo hon", va no khong can biet dau la mot tu that — thu ma
+    khong co tu dien thi khong ai biet duoc.
+
+    Vi sao khong dem "token mot chu cai" nhu ban dau: no chi bat duoc cac ca te nhat.
+    'Ố C O M' co bon token mot chu cai nen bi bat, con 'BRAI SED SNAI LS', 'TO FU',
+    'BO I LED' thi khong — va ba cai do vo y het. Do that sau lan nap dau: 'Ố C O M'
+    duoc vá, 'BRAI SED SNAI LS' thi khong.
+    """
+    if not layout.strip():
+        return mac_dinh
+
+    dong_layout = [d for d in layout.split("\n") if d.strip()]
+    ra: list[str] = []
+    for dong in mac_dinh.split("\n"):
+        if not _la_tieu_de_hoa(dong):
+            ra.append(dong)
+            continue
+        lanh = _ban_lanh(re.sub(r"\s+", "", dong), dong_layout)
+        # Bang nhau thi GIU BAN GOC. Chi doi khi doi duoc mot cai tot hon that.
+        ra.append(lanh if lanh and _so_manh(lanh) < _so_manh(dong) else dong)
+    return "\n".join(ra)

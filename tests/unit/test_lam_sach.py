@@ -9,7 +9,14 @@ Khong I/O.
 
 import pytest
 
-from knowledge.ingest.clean import Trang, ghep, lam_sach, trang_cua
+from knowledge.ingest.clean import (
+    Trang,
+    _la_tieu_de_hoa,
+    ghep,
+    lam_sach,
+    trang_cua,
+    va_chu_vo,
+)
 
 
 class TestSoTrang:
@@ -158,3 +165,94 @@ class TestBanDoTrang:
 
         assert text == "aa"
         assert ban_do == [(0, 1)]
+
+
+class TestChuVoTrongTieuDe:
+    """Tieu de dat co gian chu bi pypdf tach thanh tung chu cai roi.
+
+    Do that tren booklet Sa Pa: 7 dong bi vo. Khong chi la xau ma — `section` di
+    thang vao trich dan ("theo ..., mục Ố C O M"), vao danh sach ung vien ma cong cu
+    dua cho NGUOI DUNG chon, va vao ca `tsv`. Than bai thi khong he hong.
+
+    Cach vá: doc lai dung trang do bang `extraction_mode='layout'` roi MUON dong lanh.
+    Khong doan lai cho ngat tu — khong co tu dien thi 'Ố C O M' co the la 'ỐCOM',
+    'Ố COM' hay 'ỐC OM', va doan la bia.
+    """
+
+    async def test_muon_dong_lanh_tu_ban_layout(self) -> None:
+        ra = va_chu_vo("Ố C O M\nỐc om chuối đậu là món ăn.", "ỐC       OM      BRAISED SNAILS")
+
+        assert ra.split("\n")[0] == "ỐC OM"
+        # Than bai KHONG duoc dung toi.
+        assert ra.split("\n")[1] == "Ốc om chuối đậu là món ăn."
+
+    async def test_lay_DUNG_doan_tuong_ung_chu_khong_ca_dong(self) -> None:
+        """Ban layout dan CA HAI COT vao mot dong. Lay ca dong la nhet nguyen cot
+        tieng Anh vao cho cua tieu de tieng Viet.
+        """
+        ra = va_chu_vo("CÁ K H O  TH ÂN", "CÁ KHO THÂN                    FISH BRAISED")
+
+        assert ra == "CÁ KHO THÂN"
+
+    async def test_tim_duoc_ca_khi_doan_nam_GIUA_dong_layout(self) -> None:
+        ra = va_chu_vo("W I TH  BANANA", "CHUỐI ĐẬU              WITH        BANANA")
+
+        assert ra == "WITH BANANA"
+
+    async def test_KHONG_khop_thi_GIU_NGUYEN(self) -> None:
+        """Ca am quan trong nhat. Trang 5 cua booklet ('P R E F A C E MỞ  ĐẦU') khong
+        tim duoc doan tuong ung, va no phai duoc de yen chu khong bi doan bua.
+        """
+        goc = "P R E F A C E MỞ  ĐẦU"
+
+        assert va_chu_vo(goc, "MỞ ĐẦU\nPREFACE") == goc
+
+    async def test_CHI_nhan_khi_ban_layout_IT_CHO_NGAT_hon(self) -> None:
+        """Tieu chi nhan la so cho ngat, khong phai "trong co ve lanh hon".
+
+        Do la dinh nghia truc tiep cua "it vo hon", va no khong can biet dau la mot
+        tu that — thu ma khong co tu dien thi khong ai biet duoc.
+        """
+        goc = "Ố C O M"
+
+        # Ban layout vo y het (4 manh) -> giu ban goc.
+        assert va_chu_vo(goc, "Ố C  O M   BRAISED") == goc
+        # Ban layout it manh hon -> nhan.
+        assert va_chu_vo(goc, "ỐC   OM   BRAISED") == "ỐC OM"
+
+    async def test_bang_nhau_thi_GIU_BAN_GOC(self) -> None:
+        """Tieu de von da dung thi khong duoc dung toi, du co doc lai ban layout."""
+        assert va_chu_vo("BANANA CHIPS", "BANANA      CHIPS") == "BANANA CHIPS"
+
+    async def test_va_duoc_ca_khi_KHONG_co_token_mot_chu_cai(self) -> None:
+        """Hoi quy that. Ban dau bo do dem "token mot chu cai", nen no bat duoc
+        'Ố C O M' nhung BO SOT 'BRAI SED SNAI LS', 'TO FU', 'BO I LED' — vo y het.
+        Do sau lan nap dau: 'Ố C O M' duoc vá, 'BRAI SED SNAI LS' thi khong.
+        """
+        ra = va_chu_vo("BRAI SED SNAI LS", "BRAISED SNAILS      ỐC OM")
+
+        assert ra == "BRAISED SNAILS"
+
+    async def test_khong_co_ban_layout_thi_giu_nguyen(self) -> None:
+        assert va_chu_vo("Ố C O M", "") == "Ố C O M"
+
+
+class TestNhanDienChuVo:
+    """Bo loc phai HEP o dung mot chieu: chi doc lai ban layout cho dong TIEU DE.
+
+    Khong loc thi cookbook tieng Anh bat doc lai ca 88 trang de sua vai dong.
+    """
+
+    async def test_nhan_dong_tieu_de_viet_hoa(self) -> None:
+        assert _la_tieu_de_hoa("Ố C O M") is True
+        assert _la_tieu_de_hoa("BRAI SED SNAI LS") is True
+        assert _la_tieu_de_hoa("GÀ HẦM BÍ ĐỎ") is True
+
+    async def test_BO_QUA_van_xuoi(self) -> None:
+        assert _la_tieu_de_hoa("without their help, I wouldn't know a thing") is False
+        assert _la_tieu_de_hoa("Ốc om chuối đậu là món ăn truyền thống.") is False
+
+    async def test_BO_QUA_dong_qua_ngan(self) -> None:
+        """Mot hai chu cai thi khong du de noi day la tieu de hay mot manh vun."""
+        assert _la_tieu_de_hoa("AB") is False
+        assert _la_tieu_de_hoa("27") is False

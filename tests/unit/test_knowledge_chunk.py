@@ -8,6 +8,8 @@ from knowledge.ingest.chunk import (
     OVERLAP_CHARS,
     TARGET_CHARS,
     Chunk,
+    _chan_muc_qua_dai,
+    _Section,
     chunk_document,
 )
 from knowledge.ingest.pipeline import contextualize
@@ -123,3 +125,66 @@ class TestTrichDan:
 
     async def test_muc_khong_lien_quan_thi_giu_nguyen(self) -> None:
         assert _strip_title("Chuong 2 > Hoan tien", "So tay 2026") == "Chuong 2 > Hoan tien"
+
+
+class TestMucQuaDai:
+    """Moc lap danh dau cho BAT DAU cua mot muc, khong danh dau cho KET THUC.
+
+    Nen muc CUOI CUNG an het phan duoi tai lieu — va phan duoi thuong khong con la
+    cong thuc nua. Do that 10/09/2026 tren cookbook tieng Anh: het cong thuc o trang
+    67 roi chuyen sang bai tham khao (`All About Chocolate`, `Spice Guide`), ma cac
+    bai do khong mang byline `... from the ... dept.` nen khong sinh moc moi.
+
+    Ket qua: `Cameron's Spice Stew` mang 35 chunk — 20% ca kho — trong khi moi muc
+    khac <= 5. Bot trich kien thuc bao quan so co la kem "mục Cameron's Spice Stew".
+
+    Do dai than muc do duoc:
+
+        cookbook tieng Anh   trung vi 1.172   p90 3.352   lon nhat THAT 8.995
+        booklet Sa Pa        trung vi 1.057   p90 2.646   lon nhat THAT 5.230
+        Cameron's Spice Stew                              62.482
+
+    Nen tran 5 chunk bo lot muc hop le dai nhat mot cach thoai mai.
+    """
+
+    async def test_phan_du_MAT_TEN_chu_khong_bi_vut(self) -> None:
+        """Vut di la mat noi dung ma khong ai bao. Bo ten di la noi that: den day thi
+        ta khong con biet doan nay thuoc muc nao.
+        """
+        than = (chr(10) * 2).join(f"Doan {i} " + "x" * 400 for i in range(60))
+
+        ra = _chan_muc_qua_dai([_Section(path="Mon Test", body=than, bat_dau=0)])
+
+        assert [m.path for m in ra] == ["Mon Test", None]
+        assert sum(len(m.body) for m in ra) >= len(than) * 0.98
+
+    async def test_muc_NGAN_thi_khong_bi_dung_toi(self) -> None:
+        """Ca am: gan het moi muc that deu ngan hon tran, va chung phai nguyen ven."""
+        goc = [_Section(path="Mon Test", body="Mot doan ngan thoi.", bat_dau=0)]
+
+        assert _chan_muc_qua_dai(goc) == goc
+
+    async def test_tran_du_rong_cho_muc_hop_le_dai_nhat(self) -> None:
+        """8.995 ky tu la muc THAT dai nhat do duoc. No khong duoc bi cat."""
+        ra = _chan_muc_qua_dai([_Section(path="Mon Test", body="y" * 8_995, bat_dau=0)])
+
+        assert len(ra) == 1
+
+    async def test_muc_KHONG_TEN_thi_de_yen_du_dai(self) -> None:
+        """Loi noi dau cua cookbook la 46.870 ky tu va von da khong co ten. Cat no ra
+        lam doi khong sua duoc gi, chi tao them mot muc.
+        """
+        ra = _chan_muc_qua_dai([_Section(path=None, body="z" * 60_000, bat_dau=0)])
+
+        assert len(ra) == 1
+
+    async def test_bat_dau_cua_phan_du_van_tro_dung_cho(self) -> None:
+        """`bat_dau` la thu anh xa chunk sang SO TRANG. Sai o day thi trich dan chi
+        sai trang, va khong co loi nao bao ra.
+        """
+        than = (chr(10) * 2).join("d" * 500 for _ in range(40))
+
+        ra = _chan_muc_qua_dai([_Section(path="Mon", body=than, bat_dau=1_000)])
+
+        du = ra[1]
+        assert than[du.bat_dau - 1_000 :].startswith(du.body[:20])

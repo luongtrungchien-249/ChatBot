@@ -63,7 +63,9 @@ def _checksum(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-async def ingest_file(path: Path, ingested_by: str, title: str | None = None) -> IngestResult:
+async def ingest_file(
+    path: Path, ingested_by: str, title: str | None = None, ep: bool = False
+) -> IngestResult:
     doc_title = title or path.stem
     tai_lieu = extract_document(path)
     text = tai_lieu.text
@@ -76,12 +78,17 @@ async def ingest_file(path: Path, ingested_by: str, title: str | None = None) ->
     # Nap lai y het thi khong lam gi: embed lai vai tram chunk de ra dung ket qua cu
     # la dot tien. So sanh checksum cua VAN BAN da trich, khong phai cua tep — mot
     # PDF sua metadata van cho ra cung noi dung.
+    #
+    # `ep=True` bo qua cho tat nay. Can no vi checksum chi biet VAN BAN doi hay khong,
+    # no khong biet CACH CAT doi. Doi luat cat muc (chunk.py) hay luat lam sach ma
+    # tep khong doi thi day la duong duy nhat de dua thay doi do vao CSDL — khong co
+    # no thi ban vá nam trong ma nguon va khong bao gio toi duoc kho dang chay.
     existing = await fetch(
         """SELECT id, version, checksum FROM kb_document
             WHERE source_path = $1 ORDER BY version DESC LIMIT 1""",
         source_path,
     )
-    if existing and existing[0]["checksum"] == checksum:
+    if existing and existing[0]["checksum"] == checksum and not ep:
         _log.info("tai lieu khong doi, bo qua", path=source_path, version=existing[0]["version"])
         return IngestResult(
             doc_id=int(existing[0]["id"]),
