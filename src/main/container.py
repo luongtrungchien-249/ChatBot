@@ -157,7 +157,13 @@ async def build_deps(channel: ChannelPort, platform: Platform | None = None) -> 
             allowed_threads=await load_allowed_threads(),
         ),
         bot_name=settings.BOT_MENTION_NAME,
-        reply=ReplyModel(max_tokens=reply_model.max_tokens, effort=reply_model.effort),
+        # `or "low"`: `ModelConfig.effort` thanh tuy chon tu khi co model tu host
+        # (Gemma khong co `reasoning_effort`). Route `reply` thi luon chay tren model
+        # cua OpenAI va luon co effort — nhung kieu du lieu khong noi duoc dieu do,
+        # nen lay mac dinh thay vi ep kieu.
+        reply=ReplyModel(
+            max_tokens=reply_model.max_tokens, effort=reply_model.effort or "low"
+        ),
         react=ReactLimits(
             max_iterations=settings.REACT_MAX_ITERATIONS,
             deadline_ms=_DEADLINE_MS.get(platform, settings.REACT_DEADLINE_MS)

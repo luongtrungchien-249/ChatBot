@@ -96,6 +96,14 @@ class CallContext:
 CheapRoute = Literal["rewrite", "summarize", "extract_facts", "compress"]
 
 
+#: Duong phan hoi co the chay tren HAI model khac nhau.
+#:
+#: `poem` co the tro sang mot may tu host (xem llm/models.py). agents/ khong duoc
+#: import llm/ (luat L1) nen cho goi chi biet mot cai TEN, con viec ten do tro toi
+#: model nao la chuyen cua tang duoi.
+ReplyRoute = Literal["reply", "poem"]
+
+
 class LlmPort(Protocol):
     async def reply(
         self,
@@ -106,6 +114,7 @@ class LlmPort(Protocol):
         effort: Effort,
         ctx: CallContext,
         tools: tuple[ToolSpec, ...] = (),
+        route: ReplyRoute = "reply",
     ) -> LlmResult:
         """Duong phan hoi chinh. `system` phai la HANG SO de prompt caching an."""
         ...
