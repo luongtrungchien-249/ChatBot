@@ -17,6 +17,7 @@ Luat tho duoc cuong che bang CODE trong `tho/luat.py`, khong bang cau chu trong 
 """
 
 from tho.prompt import system_prompt
+from tho.quy_trinh import mot_dong
 from tho.sinh import KetQua, sinh_tho, tra_loi
 from tho.y_dinh import YeuCauTho
 
@@ -82,6 +83,15 @@ async def lam_tho(
         # day la con so duy nhat noi duoc khi nao bat lai duoc tang luat do.
         so_loi_bang_trac=len(ket_qua.loi_bang_trac),
         co_chu_de=bool(yeu_cau.chu_de),
+        # VET cua 10 buoc, dang gon. Xem tho/quy_trinh.py.
+        #
+        # Truoc day dong log nay chi noi TONG so lan goi — du de biet mot luot ton bao
+        # nhieu, khong du de biet ton O DAU. Bon thi nghiem truoc deu phai dung mot
+        # script do rieng moi tra loi duoc cau hoi do.
+        vet=mot_dong(ket_qua.vet),
+        # Buoc chua thi cong. Con so nay PHAI giam khi §5 cua plan duoc lam, va no la
+        # cach duy nhat de biet dieu do da xay ra that hay chua.
+        so_buoc_chua_lam=sum(1 for v in ket_qua.vet if not v.da_chay),
     )
     return tra_loi(ket_qua)
 
