@@ -322,8 +322,84 @@ class TestNguoiTrongVongLap:
         assert "KẾT QUẢ KHÔNG CHẮC" in out
         assert "1. Pasta trong lo vi song" in out
         assert "2. Goulash cua Kristin" in out
-        # KHONG duoc tra noi dung ra: dua ca hai thi model se tu chon lay mot.
-        assert "\nA" not in out
+
+
+class TestHaiNhanhCuaDanhSachHoiLai:
+    """Danh sach hoi lai co KEM TRICH DOAN, va model chon mot trong hai nhanh.
+
+    Ban dau danh sach chi co TEN, kem mot cau cam thang: "ĐỪNG trả lời bằng nội dung
+    các mục này". Ly do luc do hop ly — dua ca noi dung ra thi model se tu chon lay
+    mot muc roi tra loi, tuc vong hoi lai thanh vo nghia.
+
+    Nhung do dau-cuoi 11/09/2026 cho thay cai cam do lam hong ca mot lop cau hoi:
+
+        "Lam sao cho chuoi xanh bot chat?"
+        -> bot tra ve danh sach 8 MON AN va hoi nguoi dung chon mot mon
+
+    Nguoi dung hoi mot KY THUAT. Ca 8 muc deu tra loi giong nhau — ngam chanh va giam
+    — nen bat ho chon mot mon la hoi sai thu. Va model KHONG THE nhan ra dieu do, vi
+    no chi nhin thay TEN.
+
+    Nen bay gio danh sach kem trich doan (`_TRICH_DOAN` ky tu moi muc), va ket qua
+    cong cu neu ro hai nhanh:
+
+        CO    cac muc cung noi mot dieu  -> TRA LOI LUON, neu nguon, dung hoi
+        KHONG moi muc mot dap an rieng   -> dua danh sach ra hoi, KHONG kem trich doan
+
+    Do sau khi sua, cau tren: bot tra loi dung dap an chuan kem hai ten muc lam nguon,
+    thay vi mot danh sach mon an. Cau "Mon nao dung pho mai va mi ong" van ra danh
+    sach nhu cu — hai nhanh khong dam nhau.
+
+    CANH BAO cho nguoi sua sau: viec chon nhanh la do MODEL quyet, khong tat dinh. Do
+    lai hai luot tren cung cau: mot luot tra loi thang, mot luot hoi lai mot cau khac.
+    Dung mong doi mot nhanh co dinh cho mot cau hoi co dinh.
+    """
+
+    async def test_kem_TRICH_DOAN_de_model_thay_cac_muc_co_giong_nhau_khong(
+        self, kho: list[RetrievedChunk]
+    ) -> None:
+        kho.append(chunk("Ngam voi chanh va giam.", section="Muc mot", distance=0.56))
+        kho.append(chunk("Cung ngam chanh giam.", section="Muc hai", distance=0.58, chunk_id="2"))
+
+        out = await run_knowledge_search({"query": "bot chat"}, CTX)
+
+        assert "Ngam voi chanh va giam." in out
+        assert "Cung ngam chanh giam." in out
+
+    async def test_neu_ro_CA_HAI_nhanh(self, kho: list[RetrievedChunk]) -> None:
+        """Chi neu nhanh hoi lai thi ta quay ve dung cai bay cu."""
+        kho.append(chunk("A", section="Muc mot", distance=0.56))
+        kho.append(chunk("B", section="Muc hai", distance=0.58, chunk_id="2"))
+
+        out = await run_knowledge_search({"query": "x"}, CTX)
+
+        assert "TRẢ LỜI LUÔN" in out
+        assert "ĐỪNG hỏi lại" in out
+        assert "DỪNG lượt này" in out
+
+    async def test_nhanh_hoi_lai_van_cam_kem_trich_doan_khi_TRA_LOI_nguoi_dung(
+        self, kho: list[RetrievedChunk]
+    ) -> None:
+        """Trich doan la de MODEL doc, khong phai de do het len man hinh nguoi dung."""
+        kho.append(chunk("A", section="Muc mot", distance=0.56))
+        kho.append(chunk("B", section="Muc hai", distance=0.58, chunk_id="2"))
+
+        out = await run_knowledge_search({"query": "x"}, CTX)
+
+        assert "KHÔNG kèm trích đoạn" in out
+
+    async def test_ca_hai_nhanh_deu_cam_tra_loi_tu_tri_nho(
+        self, kho: list[RetrievedChunk]
+    ) -> None:
+        """Nhanh CO mo duong cho model tra loi — khong duoc de no thanh duong tat ve
+        lai viec tra loi tu tri nho.
+        """
+        kho.append(chunk("A", section="Muc mot", distance=0.56))
+        kho.append(chunk("B", section="Muc hai", distance=0.58, chunk_id="2"))
+
+        out = await run_knowledge_search({"query": "x"}, CTX)
+
+        assert "KHÔNG được trả lời từ trí nhớ" in out
 
     async def test_luon_co_dong_KHAC_o_cuoi_danh_sach(
         self, kho: list[RetrievedChunk]
@@ -526,3 +602,49 @@ class TestKetQua:
         payload: dict[str, Any] = {"query": 42}
         with pytest.raises(ValueError):
             await run_knowledge_search(payload, CTX)
+
+
+class TestCamBayConSoVaCachLam:
+    """Hinh dang cam bay THU HAI: hoi mot CON SO hoac mot CACH LAM.
+
+    Do dau-cuoi 11/09/2026 qua `evals.runner --qua-cong-cu` (che do chay qua
+    handle_message, tuc model tu viet truy van nhu production):
+
+        12/50 cau model KHONG goi cong cu lan nao
+
+    Mo ta cong cu luc do da goi ten cam bay "cau hoi NGUOC — hoi tu dac diem ra ten",
+    va cam bay do da duoc chan. Nhung nhung cau nay khong phai cau hoi nguoc:
+
+        "Luoc khoai so trong bao lau?"
+        "Lam sao cho chuoi xanh bot chat?"
+        "How long do I microwave the pasta?"
+
+    Chung trong y het kien thuc pho thong, nen model thay minh biet thua. Ma con so
+    trong tai lieu CUA HO moi la con so dung, va no thuong khac con so chung.
+
+    Do lai tren 16 cau (12 cau hong + 4 cau chong hoi quy): 4/16 -> 15/16 co goi
+    cong cu. Sua o CA HAI cho — luat cung trong SYSTEM_PROMPT va hinh dang nay trong
+    mo ta cong cu; xem tests/unit/test_system_prompt.py.
+    """
+
+    @property
+    def mo_ta(self) -> str:
+        return KNOWLEDGE_SEARCH_DEFINITION.description
+
+    async def test_goi_ten_cam_bay_CON_SO_va_CACH_LAM(self) -> None:
+        assert "MỘT CON SỐ" in self.mo_ta
+        assert "MỘT CÁCH LÀM" in self.mo_ta
+
+    async def test_neu_LY_DO_chu_khong_chi_ra_lenh(self) -> None:
+        """Con so trong tai lieu cua ho thuong KHAC con so chung — do la ly do, va
+        model tuan mot lenh co ly do tot hon lenh tran.
+        """
+        assert "thường khác con số chung" in self.mo_ta
+
+    async def test_co_vi_du_va_KHONG_lay_cau_dang_do(self) -> None:
+        """Vi du CO Y chon mot cau khong nam trong golden.jsonl. Lay dung cau dang do
+        lam vi du la day vet, va con so sau do khong con do duoc gi.
+        """
+        assert "Ướp thịt bao lâu cho ngấm?" in self.mo_ta
+        for dang_do in ("luộc bí", "bớt chát", "bớt ngứa", "microwave"):
+            assert dang_do not in self.mo_ta, dang_do

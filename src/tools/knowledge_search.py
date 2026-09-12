@@ -64,6 +64,11 @@ KNOWLEDGE_SEARCH_DEFINITION = ToolDefinition(
         "và cà chua?\": kể ra vài món bạn biết sẵn là trả lời về THẾ GIỚI, trong khi người "
         "dùng đang hỏi trong KHO CỦA HỌ có gì. Từng cái tên bạn kể có thể đúng mà cả câu "
         "trả lời vẫn sai, và nó sẽ không có nguồn. "
+        "Cạm bẫy thứ hai, cùng một gốc: câu hỏi về MỘT CON SỐ (\"luộc bao lâu\", \"mấy "
+        "độ\", \"bao nhiêu gram\") hay MỘT CÁCH LÀM (\"làm sao để...\", \"xử lý thế nào\"). "
+        "Ví dụ với \"Ướp thịt bao lâu cho ngấm?\": loại này trông y hệt kiến thức phổ "
+        "thông nên bạn sẽ thấy mình biết thừa — nhưng con số trong tài liệu CỦA HỌ mới "
+        "là con số đúng, và nó thường khác con số chung. Vẫn phải tra. "
         "Trả lời từ trí nhớ trong khi tài liệu của họ có sẵn câu trả lời là bỏ phí đúng "
         "thứ họ đã nạp vào. "
         "Không tìm thấy thì công cụ sẽ nói rõ bước tiếp theo. "
@@ -216,6 +221,18 @@ def is_knowledge_search_available() -> bool:
 #: ket qua thua thap han cai gia cua viec hoi ho them mot lan nua.
 _K_SAU = 12
 
+#: Do dai trich doan kem theo moi ung vien trong danh sach hoi lai.
+#:
+#: Ban dau danh sach chi co TEN, kem mot cau cam "ĐỪNG trả lời bằng nội dung các mục
+#: này". Do 11/09/2026 cho thay cam do lam hong ca mot lop cau hoi: "Lam sao cho chuoi
+#: xanh bot chat?" tra ve danh sach 8 MON AN va hoi nguoi dung chon mot mon — trong khi
+#: ho hoi mot KY THUAT, va ca 8 muc deu tra loi giong nhau (ngam chanh va giam). Model
+#: khong the nhan ra dieu do, vi no chi nhin thay TEN.
+#:
+#: 240 ky tu du de thay cac muc co cung noi mot dieu hay khong. 12 ung vien x 240 con
+#: cach rat xa tran 12.000 token cua tang `tool`.
+_TRICH_DOAN = 240
+
 #: Nguoi dung tra loi "khong phai muc nao o tren". Doi chieu sau khi bo dau va ha
 #: chu thuong — model co the chep lai "Khac", "khac", "OTHER"...
 _KHAC = frozenset({"khac", "khong phai", "khong", "other", "none", "deu khong"})
@@ -263,21 +280,32 @@ def _danh_sach_lua_chon(chunks: list[RetrievedChunk]) -> str:
     "goi y" hoi: phai noi ro day la ngoai le da duoc cho phep, va vi sao no khac —
     ta CO ung vien co that trong tay, chu khong phai dang hoi vi luoi tra cuu.
     """
-    ten: list[str] = []
+    dau: dict[str, str] = {}
     for c in chunks:
-        if _ten(c) not in ten:
-            ten.append(_ten(c))
+        # Giu doan DAU TIEN cua moi ten: `chunks` da xep theo do lien quan nen do
+        # la doan gan cau hoi nhat cua muc do.
+        dau.setdefault(_ten(c), " ".join(c.content.split())[:_TRICH_DOAN])
 
-    dong = "\n".join(f"{i}. {t}" for i, t in enumerate(ten, start=1))
+    ten = list(dau)
+    dong = "\n".join(
+        f"{i}. {t}\n   {dau[t]}" for i, t in enumerate(ten, start=1)
+    )
     return (
-        "KẾT QUẢ KHÔNG CHẮC — tài liệu có vài mục liên quan nhưng không mục nào khớp "
-        "hẳn câu hỏi. ĐỪNG trả lời bằng nội dung các mục này, và cũng đừng trả lời từ "
-        "trí nhớ.\n\n"
-        "Hãy đưa NGUYÊN danh sách dưới đây cho người dùng, giữ đúng số thứ tự và đúng "
-        "tên, rồi hỏi họ chọn mục nào. Hỏi đúng một câu ngắn, rồi DỪNG lượt này.\n\n"
+        "KẾT QUẢ KHÔNG CHẮC — tài liệu có vài mục liên quan nhưng không mục nào "
+        "khớp hẳn câu hỏi.\n\n"
+        "TRƯỚC KHI HỎI LẠI, xét một điều: các mục dưới đây có cùng nói MỘT điều "
+        "trả lời được câu hỏi không?\n\n"
+        "- CÓ — người dùng hỏi một KỸ THUẬT hay một CÁCH LÀM chung (kiểu "
+        "\"làm sao cho bớt chát\", \"khử mùi thế nào\"), và các mục đều nói giống "
+        "nhau: TRẢ LỜI LUÔN bằng điều chung đó, nêu nguồn, ĐỪNG hỏi lại. Họ hỏi "
+        "CÁCH LÀM, không hỏi món nào — bắt họ chọn một món là hỏi sai thứ.\n"
+        "- KHÔNG — các mục là những lựa chọn khác nhau, mỗi mục một đáp án riêng: "
+        "đưa NGUYÊN danh sách dưới đây cho người dùng, giữ đúng số thứ tự và đúng "
+        "tên và KHÔNG kèm trích đoạn, hỏi đúng một câu ngắn rồi DỪNG lượt này.\n\n"
+        "Cả hai nhánh đều KHÔNG được trả lời từ trí nhớ.\n\n"
         f"{dong}\n"
         f"{len(ten) + 1}. Khác — không phải mục nào ở trên\n\n"
-        "Đây là NGOẠI LỆ đã được cho phép của luật \"làm trước, hỏi sau\": bạn đang cầm "
+        "Nhánh hỏi lại là NGOẠI LỆ đã được cho phép của luật \"làm trước, hỏi sau\": bạn đang cầm "
         "sẵn các mục có thật trong tài liệu, nên đây là một lựa chọn để người dùng "
         "quyết, không phải một câu hỏi thay cho việc tra cứu.\n"
         "Họ chọn xong thì gọi lại search_knowledge_base với `chon` là tên mục họ chọn "
