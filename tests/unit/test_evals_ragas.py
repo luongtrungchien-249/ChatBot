@@ -203,9 +203,13 @@ class TestCongCuGhiLai:
 
     async def test_chuyen_tiep_specs_nguyen_ven(self) -> None:
         """Doi danh sach cong cu la doi hanh vi model — bo boc phai trong suot."""
-        ghi = _CongCuGhiLai(self._gia(()))  # type: ignore[arg-type]
+        gia = self._gia(())
+        ghi = _CongCuGhiLai(gia)  # type: ignore[arg-type]
 
-        assert ghi.specs() == ("spec_gia",)
+        # So voi chinh cai ham gia tra ra, khong so voi mot hang so viet tay: thu test
+        # nay kiem la bo boc CHUYEN TIEP nguyen ven, chu khong phai ham gia tra dung gi.
+        # (So voi hang so chuoi thi lech kieu, vi `specs()` khai bao tra ToolDefinition.)
+        assert ghi.specs() == gia.specs()  # type: ignore[attr-defined]
 
 
 class TestKenhGom:

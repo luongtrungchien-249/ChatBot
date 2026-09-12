@@ -10,6 +10,7 @@ from tho.luat import kiem_luc_bat
 from tho.prompt import nhac_sua, nhac_sua_be_chu, system_prompt, yeu_cau
 from tho.sinh import (
     LOI_KHUNG,
+    GoiModel,
     _cat_ve_khung_dung,
     doc_diem_chon,
     sinh_tho,
@@ -41,7 +42,7 @@ SAI_VAN = (
 )
 
 
-def model_tra(*ban: str):
+def model_tra(*ban: str) -> tuple[GoiModel, list[list[str]]]:
     """Ham gia: tra ve lan luot cac ban duoc dua vao, ghi lai moi luot."""
     lich_su: list[list[str]] = []
 
@@ -52,7 +53,7 @@ def model_tra(*ban: str):
     return goi, lich_su
 
 
-def model_tra_nhieu(ban: list[str]):
+def model_tra_nhieu(ban: list[str]) -> tuple[GoiModel, list[int]]:
     """Ham gia cho SINH SONG SONG: moi lan goi tra ve mot ban khac nhau."""
     dem = [0]
 
@@ -569,7 +570,7 @@ SAI_VAN_2 = (
 )
 
 
-def nguoi_cham(diem: str):
+def nguoi_cham(diem: str) -> tuple[GoiModel, list[int]]:
     """Ham gia cho NGUOI CHAM. Tra ve `diem`, ghi lai so lan duoc goi.
 
     Tach hoan toan khoi `goi_model`: tu 11/09/2026 nguoi cham la mot MODEL KHAC — dung

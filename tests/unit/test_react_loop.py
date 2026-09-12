@@ -253,7 +253,7 @@ class TestChanChuaTraDaTraLoi:
     async def test_KHONG_nhac_khi_da_goi_cong_cu_tai_lieu(self) -> None:
         """Da tra roi thi cau tra loi tiep theo khong bi chan nua."""
         deps, _ = make_deps(
-            [wants_tools([("search_knowledge_base", {})]), answer("30 phut.")],
+            [wants_tools("search_knowledge_base"), answer("30 phut.")],
             tools=FakeTools(definitions=(KB_TOOL,)),
         )
 

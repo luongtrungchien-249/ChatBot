@@ -158,7 +158,7 @@ class TestChonModelChoRouteTho:
         monkeypatch.setenv("POEM_MODEL_ID", "gpt-4o-mini")
         from config import get_settings
 
-        get_settings.cache_clear()  # type: ignore[attr-defined]
+        get_settings.cache_clear()
 
         m = model_cho("poem")
 
@@ -171,7 +171,7 @@ class TestChonModelChoRouteTho:
         monkeypatch.setenv("POEM_MODEL_ID", "gpt-5-nano")
         from config import get_settings
 
-        get_settings.cache_clear()  # type: ignore[attr-defined]
+        get_settings.cache_clear()
 
         m = model_cho("poem")
 
@@ -185,7 +185,7 @@ class TestChonModelChoRouteTho:
         monkeypatch.setenv("POEM_MODEL_ID", "gpt-4o-mini")
         from config import get_settings
 
-        get_settings.cache_clear()  # type: ignore[attr-defined]
+        get_settings.cache_clear()
 
         assert model_cho("poem").base_url is None
 
@@ -198,7 +198,7 @@ class TestChonModelChoRouteTho:
         monkeypatch.setenv("POEM_MODEL_ID", "gpt-4o-mini")
         from config import get_settings
 
-        get_settings.cache_clear()  # type: ignore[attr-defined]
+        get_settings.cache_clear()
 
         assert model_cho("poem").price_out > 0
 
@@ -209,6 +209,6 @@ class TestChonModelChoRouteTho:
         monkeypatch.setenv("POEM_MODEL_ID", "mot-model-khong-ton-tai")
         from config import get_settings
 
-        get_settings.cache_clear()  # type: ignore[attr-defined]
+        get_settings.cache_clear()
 
         assert model_cho("poem").id == "gpt-5-mini"
