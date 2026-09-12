@@ -19,7 +19,7 @@ from infra.db import execute
 from infra.logger import get_logger
 from infra.ratelimit import add_cost
 
-from .models import MODELS, Route
+from .models import Route, model_cho
 
 _log = get_logger()
 
@@ -36,7 +36,11 @@ def cost_of(route: Route, usage: LlmUsage) -> float:
     OpenAI khong tinh phi ghi cache nen cache_write_tokens luon 0; cot van giu trong
     usage_log de khong phai doi schema neu doi nha cung cap.
     """
-    model = MODELS[route]
+    # `model_cho` chu khong `MODELS[route]`: route `poem` KHONG co trong `MODELS`
+    # (no doc config nen phai lay luc chay), nen tra thang vao dict se nem KeyError.
+    # Kieu `Route` co liet ke "poem", tuc kieu dang NOI DOI ve do an toan cua phep
+    # tra do — va dieu do da giau mot loi ke toan suot nhieu ngay.
+    model = model_cho(route)
     per_million = (
         usage.input_tokens * model.price_in
         + usage.cache_read_tokens * model.price_cached_in
@@ -137,7 +141,7 @@ async def record(entry: UsageRecord) -> float:
             entry.scope.thread_id,
             entry.sender_id,
             entry.route,
-            MODELS[entry.route].id,
+            model_cho(entry.route).id,
             entry.usage.input_tokens,
             entry.usage.output_tokens,
             entry.usage.cache_read_tokens,
