@@ -54,6 +54,12 @@ jobs:
       RERANK_API_KEY: ${{ secrets.RERANK_API_KEY || 'fake' }}
       RERANK_MIN_SCORE: '0.55'
       BOT_MENTION_NAME: CP_Assistant,CP,Bot_CP_Assistant
+      # BAT BUOC cho che do --qua-cong-cu. Mac dinh cua schema la
+      # GROUP_POLICY=allowlist / DM_POLICY=pairing, ma che do do sinh thread_id moi
+      # cho moi cau hoi — tuc tang truy cap se chan SACH, `handle_message` tra ve
+      # "khong tra loi", va eval se cham 50 cau rong roi in ra mot bao cao sai.
+      GROUP_POLICY: open
+      DM_POLICY: open
       DAILY_BUDGET_USD: '5'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -105,11 +111,35 @@ jobs:
 
       # Ma thoat 2 = dataset con la dong mau. Do la mot viec CO Y chua lam, khong
       # phai mot hong hoc — bao vang va di tiep. Chi ma 1 moi lam job do.
+      # HAI MUC CHI PHI, va do la co y:
+      #   nightly / bam tay  ->  golden.jsonl + --ragas + --qua-cong-cu
+      #   pull_request       ->  qa.jsonl, khung cu, 3 lan goi model moi cau
+      #
+      # Job dem chay che do --qua-cong-cu vi do la DUONG ONG THAT: model tu viet truy
+      # van roi moi goi cong cu. Che do mac dinh day thang cau hoi vao knowledge.search
+      # nen no khong di qua buoc do, va no cham diem thap gia cho hai nhom cau
+      # `giao_tap_hop` va `xuyen_ngon_ngu`. Do 11/09 tren cung 6 cau: Context Precision
+      # 0,677 o che do mac dinh so voi 1,000 khi chay qua cong cu.
+      #
+      # Danh doi: che do do KHONG tinh duoc Recall@5 (cong cu tra ve van ban da dinh
+      # dang, khong kem chunk_id), nen cong chan dua vao bon chi so RAGAS va phep dem
+      # `neo`.
+      #
+      # Bon chi so RAGAS dat hon gap doi, va mot PR khong can den chung de biet minh
+      # co lam tut cai gi khong. Job dem thi can, vi no la cho duy nhat nhin thay
+      # chi so tach theo TUNG LOAI cau hoi — mot trung binh chung giau mat viec mot
+      # loai dang hong, dung nhu da xay ra ngay 10/09/2026.
       - name: Chay eval
         if: steps.khoa.outputs.co_khoa == 'true'
         run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS=""
+          else
+            ARGS="evals/dataset/golden.jsonl --ragas --qua-cong-cu"
+          fi
+          echo "Chay: uv run python -m evals.runner $ARGS"
           set +e
-          uv run python -m evals.runner
+          uv run python -m evals.runner $ARGS
           code=$?
           set -e
           if [ $code -eq 2 ]; then

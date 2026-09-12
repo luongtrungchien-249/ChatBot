@@ -22,6 +22,7 @@ from agents.ports.llm import (
     LlmMessage,
     LlmResult,
     LlmUsage,
+    ReplyRoute,
     ToolCall,
     ToolMessage,
     ToolSpec,
@@ -31,7 +32,15 @@ from config import get_settings
 from infra.logger import get_logger
 
 from .cost_meter import UsageRecord, record
-from .models import CHEAP_TIMEOUT_S, MODELS, REPLY_TIMEOUT_S, Route
+from .models import (
+    CHEAP_TIMEOUT_S,
+    MODELS,
+    POEM_TIMEOUT_S,
+    REPLY_TIMEOUT_S,
+    ModelConfig,
+    Route,
+    model_cho,
+)
 
 _log = get_logger()
 _EMPTY_USAGE = LlmUsage(
@@ -39,14 +48,26 @@ _EMPTY_USAGE = LlmUsage(
 )
 
 _T = TypeVar("_T")
-_client: AsyncOpenAI | None = None
+
+#: Mot client cho MOI endpoint, khoa theo (base_url, api_key).
+#:
+#: Truoc day la MOT bien toan cuc, vi ca bot chi noi chuyen voi OpenAI. Tu khi route
+#: `poem` co the tro sang mot may tu host, mot client khong con du — va dung chung
+#: mot client cho hai endpoint se gui khoa cua ben nay sang ben kia.
+_clients: dict[tuple[str | None, str | None], AsyncOpenAI] = {}
 
 
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=get_settings().OPENAI_API_KEY, max_retries=0)
-    return _client
+def _get_client(model: ModelConfig | None = None) -> AsyncOpenAI:
+    khoa = (model.base_url if model else None, model.api_key if model else None)
+    client = _clients.get(khoa)
+    if client is None:
+        client = AsyncOpenAI(
+            api_key=khoa[1] or get_settings().OPENAI_API_KEY,
+            base_url=khoa[0] or None,
+            max_retries=0,
+        )
+        _clients[khoa] = client
+    return client
 
 
 def _to_usage(raw: Any) -> LlmUsage:
@@ -151,11 +172,12 @@ class OpenAiLlm:
         effort: Effort,
         ctx: CallContext,
         tools: tuple[ToolSpec, ...] = (),
+        route: ReplyRoute = "reply",
     ) -> LlmResult:
         return await self._measured(
             "reply",
             ctx,
-            lambda: self._do_reply(system, messages, max_tokens, effort, ctx, tools),
+            lambda: self._do_reply(system, messages, max_tokens, effort, ctx, tools, route),
         )
 
     async def _do_reply(
@@ -166,8 +188,9 @@ class OpenAiLlm:
         effort: Effort,
         ctx: CallContext,
         tools: tuple[ToolSpec, ...],
+        route: ReplyRoute,
     ) -> tuple[LlmResult, LlmUsage]:
-        model = MODELS["reply"]
+        model = model_cho(route)
         extra: dict[str, Any] = {}
         if tools:
             extra["tools"] = _to_openai_tools(tools)
@@ -175,14 +198,18 @@ class OpenAiLlm:
             # khong can tra cuu gi. Parallel tool calling la MAC DINH, khong tat.
             extra["tool_choice"] = "auto"
 
-        response = await _get_client().chat.completions.create(
+        # `reasoning_effort` CHI gui khi model co no. Model tu host (Gemma, Qwen...)
+        # khong co tham so nay va se tu choi ca request.
+        if model.effort is not None:
+            extra["reasoning_effort"] = effort
+
+        response = await _get_client(model).chat.completions.create(
             model=model.id,
             # KHONG phai max_tokens: model reasoning dung max_completion_tokens, va
             # token reasoning an vao cap nay. Xem canh bao trong models.py.
             max_completion_tokens=max_tokens,
-            reasoning_effort=effort,
             messages=_to_openai_messages(system, messages),
-            timeout=REPLY_TIMEOUT_S,
+            timeout=POEM_TIMEOUT_S if route == "poem" else REPLY_TIMEOUT_S,
             **extra,
         )
 
@@ -222,10 +249,13 @@ class OpenAiLlm:
     ) -> str:
         async def call() -> tuple[str, LlmUsage]:
             model = MODELS[route]
-            response = await _get_client().chat.completions.create(
+            them: dict[str, Any] = {}
+            if model.effort is not None:
+                them["reasoning_effort"] = model.effort
+            response = await _get_client(model).chat.completions.create(
                 model=model.id,
                 max_completion_tokens=max_tokens,
-                reasoning_effort=model.effort,
+                **them,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": input},

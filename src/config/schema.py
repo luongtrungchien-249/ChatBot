@@ -85,6 +85,28 @@ class Settings(BaseSettings):
     RERANK_MIN_SCORE: float = Field(ge=0, le=1)
 
     # --- Ha tang ---
+    #: Tu host model cho route `poem`. Rong = dung model chung cua ca bot.
+    #:
+    #: Dat vao day mot endpoint TUONG THICH OpenAI (vLLM, TGI). Vi du:
+    #:     POEM_BASE_URL=http://localhost:8000/v1
+    #:     POEM_MODEL_ID=google/gemma-4-26b-a4b-it
+    #:     POEM_API_KEY=khoa-gia
+    #:
+    #: CANH BAO VE PHAN CUNG: model 26B can ~13-15 GB VRAM o int4, ~26 GB o int8. MoE
+    #: van phai nap TOAN BO expert vao VRAM — phan thua chi nam o phep tinh. Do tren
+    #: may dang phat trien: RTX 3050 Ti Laptop, 4 GB VRAM — THIEU khoang 3,5 lan, va
+    #: model se khong nap noi chu khong phai chay cham.
+    POEM_BASE_URL: str = ""
+    #: Model cho RIENG route tho. De trong = dung chung model voi ca bot.
+    #:
+    #: Dat mot id OpenAI (gpt-4o-mini, gpt-5-nano) de doi model cho rieng route nay
+    #: ma khong dung toi phan con lai — moi luat trong SYSTEM_PROMPT deu duoc hieu
+    #: chuan tren gpt-5-mini, nen doi model cho ca bot se lam so lieu do het gia tri.
+    #:
+    #: Dat cung POEM_BASE_URL thi day la ten model tren may tu host.
+    POEM_MODEL_ID: str = ""
+    POEM_API_KEY: str = "khong-can"
+
     DATABASE_URL: str = Field(min_length=1)
     REDIS_URL: str = Field(min_length=1)
 

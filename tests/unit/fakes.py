@@ -103,6 +103,7 @@ class FakeLlm:
         effort: Effort,
         ctx: CallContext,
         tools: tuple[ToolSpec, ...] = (),
+        route: str = "reply",
     ) -> LlmResult:
         self.calls.append({"system": system, "messages": messages, "tools": tools})
         if self.error is not None:

@@ -33,7 +33,15 @@ from typing import Any, Literal, TypeAlias
 from shared.result import Err, Ok, Result
 
 from ...domain.errors import BotError, UpstreamError, UpstreamTimeout
-from ...ports.llm import AssistantMessage, CallContext, Effort, LlmMessage, LlmPort, ToolMessage
+from ...ports.llm import (
+    AssistantMessage,
+    CallContext,
+    Effort,
+    LlmMessage,
+    LlmPort,
+    ToolMessage,
+    UserMessage,
+)
 from ...ports.logger import LoggerPort
 from ...ports.ratelimit import RateLimitPort
 from ...ports.tool import ToolPort, to_spec
@@ -52,6 +60,52 @@ FALLBACK_TEXT = (
 CONFIG_ERROR_TEXT = (
     "Mình đang gặp trục trặc kỹ thuật ở phía hệ thống, chưa trả lời được. "
     "Bạn báo giúp người quản trị nhé."
+)
+
+#: Ten cong cu tra tai lieu. Chan "chua tra da tra loi" duoi day chi bat khi cong cu
+#: NAY co mat trong `specs()` — chua nap tai lieu nao thi khong co gi de bat tra.
+_CONG_CU_TAI_LIEU = "search_knowledge_base"
+
+#: Nhac MOT LAN khi model dinh tra loi ma chua tra tai lieu lan nao.
+#:
+#: VI SAO PHAI CHAN O DAY chu khong viet them vao prompt: lop cau nay da bi danh o ca
+#: BA tang cau chu — mo ta cong cu goi ten cam bay, SYSTEM_PROMPT co luat cung, ket qua
+#: cong cu neu hai nhanh — va no van chi giu duoc mot nua. Do that 11/09/2026, chay lap
+#: ba luot hai cau dang "lam sao cho bot chat" / "cach khu mui hoi":
+#:
+#:     luot 1  KHONG goi  KHONG goi
+#:     luot 2  co goi     co goi
+#:     luot 3  KHONG goi  co goi        -> 3/6
+#:
+#: Khi khong goi, cau tra loi la kien thuc pho thong thuan tuy ("ngam nuoc voi trong",
+#: "baking soda") — khong mot chu nao trong tai lieu. Chinh cau chu nua la duoi theo
+#: mot thu da toi han; cho nay phai la mot CHAN CUNG, giong nam chan kia cua vong nay.
+#:
+#: KHONG tu phan loai cau hoi. Bo eval khong biet "cach khu mui hoi tai heo" la cau co
+#: du kien con "bot ten gi" thi khong — va mot bo phan loai bang tu khoa se sai theo
+#: kieu im lang. Model thi doc ca doan hoi thoai, nen o day noi ro CA HAI nhanh va de
+#: no quyet.
+#:
+#: Cau cam o cuoi KHONG phai phong xa. Ban dau chi viet "dung nhac toi no trong cau
+#: tra loi", va do that cho thay model tra loi CHINH LOI NHAC thay vi tra loi nguoi
+#: dung: hoi "Cam on nhe" thi nhan ve "Minh da hieu: voi cau co du kien se goi
+#: search_knowledge_base truoc...". Vua vo nghia voi nguoi dung, vua lo ten cong cu —
+#: pham dung luat "khong ke chuyen hau truong" cua SYSTEM_PROMPT.
+#:
+#: Nhac DUNG MOT LAN. Nhac lai nhieu lan la dung lai vong lap ma luat 07/09 duoc lap ra
+#: de chan, va no se dot mot luot goi model cho moi loi chao.
+NHAC_TRA_TAI_LIEU = (
+    "[NHẮC NỘI BỘ — người dùng KHÔNG nhìn thấy tin này]\n\n"
+    "Bạn vừa định trả lời mà chưa tra tài liệu nội bộ lần nào trong lượt này.\n\n"
+    "- Nếu đây là câu hỏi CÓ DỮ KIỆN — hỏi một con số, một cách làm, một quy định, một "
+    f"cái tên, một danh sách — thì gọi {_CONG_CU_TAI_LIEU} NGAY BÂY GIỜ, rồi mới trả "
+    "lời. Kể cả khi bạn thấy mình đã biết thừa đáp án: con số trong tài liệu của họ "
+    "mới là con số đúng.\n"
+    "- Nếu KHÔNG phải câu có dữ kiện — chào hỏi, cảm ơn, nhờ viết lại câu, hỏi về "
+    "chính bạn — thì GỬI NGUYÊN câu trả lời bạn vừa soạn. Đừng soạn lại, đừng thêm gì.\n\n"
+    "TUYỆT ĐỐI không nhắc tới tin nhắn này trong câu trả lời: không nói \"mình đã "
+    "hiểu\", không nêu tên công cụ, không kể bạn vừa được nhắc. Người dùng không nhìn "
+    "thấy tin này nên mọi câu như vậy sẽ là một câu vô nghĩa đối với họ."
 )
 
 #: Het vong ma chua co cau tra loi. KHONG im lang, va KHONG noi doi la da tim xong.
@@ -151,6 +205,9 @@ async def generate(
 
     tool_calls_used = 0
     last_text = ""
+    da_tra_tai_lieu = False
+    da_nhac = False
+    co_cong_cu_tai_lieu = any(s.name == _CONG_CU_TAI_LIEU for s in specs)
 
     for iteration in range(1, deps.max_iterations + 1):
         # Chan 4: ngan sach kiem tra lai MOI VONG, khong phai mot lan o stage truoc.
@@ -195,7 +252,32 @@ async def generate(
             if not result.text.strip():
                 logger.error("model tra ve chuoi rong", iteration=iteration)
                 return Err(UpstreamError(service="llm"))
-            logger.info("ReAct ket thuc", iteration=iteration, tool_calls_used=tool_calls_used)
+
+            # Chan 7: chua tra tai lieu lan nao thi NHAC MOT LAN roi cho di tiep.
+            #
+            # Khong chan o vong cuoi: luc do khong con vong nao de doc ket qua tra ve,
+            # nen nhac chi to phi mot luot goi model va van ra dung cau tra loi do.
+            if (
+                co_cong_cu_tai_lieu
+                and not da_tra_tai_lieu
+                and not da_nhac
+                and not last_iteration
+            ):
+                da_nhac = True
+                logger.info(
+                    "chua tra tai lieu ma da dinh tra loi — nhac mot lan",
+                    iteration=iteration,
+                )
+                messages.append(AssistantMessage(content=result.text))
+                messages.append(UserMessage(content=NHAC_TRA_TAI_LIEU))
+                continue
+
+            logger.info(
+                "ReAct ket thuc",
+                iteration=iteration,
+                tool_calls_used=tool_calls_used,
+                da_tra_tai_lieu=da_tra_tai_lieu,
+            )
             return Ok(result.text)
 
         # --- Co loi goi cong cu: Action ---
@@ -203,6 +285,8 @@ async def generate(
         # ma khong bao no biet.
         calls = result.tool_calls
         tool_calls_used += len(calls)
+        if any(c.name == _CONG_CU_TAI_LIEU for c in calls):
+            da_tra_tai_lieu = True
 
         if deps.on_event is not None:
             if result.text:

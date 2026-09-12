@@ -229,3 +229,94 @@ class TestGiongTraLoi:
         """
         assert "hôm nay mình mệt quá" in SYSTEM_PROMPT  # vi du noi chuyen thuong
         assert "Postgres hay MongoDB" in SYSTEM_PROMPT  # vi du tra loi bang van xuoi
+
+
+class TestLuatKhongTraLoiTuTriNho:
+    """LUAT CUNG: moi cau hoi co du kien deu phai tra tai lieu TRUOC khi tra loi.
+
+    Luat nay von DA CO trong SYSTEM_PROMPT, va model van bo qua. Do dau-cuoi
+    11/09/2026 qua `evals.runner --qua-cong-cu` tren golden.jsonl:
+
+        12/50 cau model KHONG goi cong cu lan nao
+
+    Nhung cau do khong phai cau kho. Chung la:
+
+        "Nau sua bi do thi luoc bi trong bao lau?"
+        "Lam the nao de khoai so bot ngua khi so che?"
+        "Lam sao cho chuoi xanh bot chat?"
+
+    Tuc cau hoi ve MOT CON SO hoac MOT CACH LAM — trong y het kien thuc pho thong, nen
+    model thay minh biet thua va tra loi thang tu tri nho, khong nguon.
+
+    Vi sao luat cu khong an: no buoc dieu kien theo SU TU TIN cua model — "ke ca cau
+    ban nghi minh da biet". Voi lop cau nay model LUON tu tin, nen dieu kien do tu vo
+    hieu dung luc can nhat. Cung co che da lam hong mo ta cong cu ngay 10/09.
+
+    Ban sua doi dieu kien do lay mot luat KHONG DIEU KIEN, va goi ten hai hinh dang
+    cau hoi hay bi bo qua. Do lai tren 16 cau (12 cau hong + 4 cau chong hoi quy):
+
+        co goi cong cu   4/16  ->  15/16
+
+    Bo do nay CHI so sanh duoc o che do --qua-cong-cu. Che do mac dinh day thang cau
+    hoi vao knowledge.search nen no LUON tra, va no khong bao gio nhin thay lop loi
+    nay — hai nhom `thuoc_tinh` va `quy_trinh` dat 1,000 va 0,900 o do trong khi qua
+    nua so cau chua he cham toi tai lieu.
+    """
+
+    async def test_la_luat_KHONG_DIEU_KIEN(self) -> None:
+        assert "LUẬT CỨNG" in SYSTEM_PROMPT
+        assert "KHÔNG trả lời từ trí nhớ" in SYSTEM_PROMPT
+        assert "Không ngoại lệ" in SYSTEM_PROMPT
+
+    async def test_KHONG_con_buoc_dieu_kien_theo_su_tu_tin(self) -> None:
+        """Hoi quy that ma test nay chan: "ke ca cau ban nghi minh da biet" nghe rat
+        manh nhung no tu vo hieu dung voi lop cau model tu tin nhat.
+        """
+        assert "kể cả câu bạn nghĩ mình đã biết" not in SYSTEM_PROMPT
+
+    async def test_goi_ten_hai_hinh_dang_cau_hoi_hay_bi_bo_qua(self) -> None:
+        """Vi du day manh hon luat — do la ket luan da do duoc cua chinh du an nay."""
+        assert "bao lâu" in SYSTEM_PROMPT
+        assert "làm sao để" in SYSTEM_PROMPT
+
+    async def test_van_trong_tran_tang_system(self) -> None:
+        """Luat nay duoc them bang cach VIET LAI mot dong san co, khong phai noi them
+        vao. Tran tang `system` chi con 137 ky tu luc sua, va noi tran ma khong cat
+        truoc la cach prompt phinh ra tung dot ma khong ai chiu trach nhiem.
+        """
+        estimated = -(-len(SYSTEM_PROMPT) // CHARS_PER_TOKEN)
+
+        assert estimated <= TOKEN_BUDGET["system"]
+
+
+class TestThuTuTinCay:
+    """Nguon nao thang khi chung noi khac nhau.
+
+    Luat: TAI LIEU NOI BO > bo nho da luu va hoi thoai cu > tri nho cua model > web.
+
+    Cho quan trong nhat la MAU THUAN THI VAN TRA LOI. Mot cong chan kieu "hai ben
+    khop moi duoc tra loi" nghe an toan nhung no chan dung nhung cau DUNG: tai lieu
+    noi bo khac kien thuc chung la chuyen BINH THUONG, va do chinh la ly do to chuc
+    nap tai lieu vao. Vi du: "nghi phep nam bao nhieu ngay" — tri nho model noi 12
+    theo luat chung, tai lieu cong ty ghi 15. Cong chan se lam bot im lang dung luc
+    no dang cam cau tra loi dung.
+
+    Ban ghi trong kho cung khong duoc quyen phu quyet tai lieu: mot fact ai do luu
+    bang `nho giup:` tu thang truoc co the da cu, con tai lieu thi moi hon.
+    """
+
+    async def test_neu_ro_THU_TU(self) -> None:
+        assert "THỨ TỰ TIN CẬY" in SYSTEM_PROMPT
+        assert "TÀI LIỆU NỘI BỘ > bộ nhớ đã lưu và hội thoại cũ > trí nhớ của bạn > web" in (
+            SYSTEM_PROMPT
+        )
+
+    async def test_mau_thuan_thi_TAI_LIEU_THANG(self) -> None:
+        assert "TÀI LIỆU THẮNG" in SYSTEM_PROMPT
+
+    async def test_mau_thuan_thi_VAN_TRA_LOI_chu_khong_im_lang(self) -> None:
+        """Ca am quan trong nhat cua luat nay. Xem docstring o tren."""
+        assert "vẫn trả lời, không im lặng" in SYSTEM_PROMPT
+
+    async def test_neu_LY_DO_chu_khong_chi_ra_lenh(self) -> None:
+        assert "tài liệu là của họ và mới hơn" in SYSTEM_PROMPT

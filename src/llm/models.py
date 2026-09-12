@@ -14,17 +14,30 @@ Doi cho nay la doi mot file.
 from dataclasses import dataclass
 from typing import Literal
 
-Route = Literal["reply", "rewrite", "summarize", "extract_facts", "compress"]
+Route = Literal["reply", "rewrite", "summarize", "extract_facts", "compress", "poem"]
 
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     id: str
-    effort: Literal["low", "medium", "high"]
     max_tokens: int
     price_in: float
     price_cached_in: float
     price_out: float
+    #: `reasoning_effort` la tham so RIENG CUA MODEL REASONING cua OpenAI. Model tu
+    #: host (Gemma, Qwen, Llama...) khong co no, va gui len se bi tu choi.
+    #:
+    #: None = khong gui tham so nay. Day la cho trừu tượng bi RO khi them model tu
+    #: host, va giai phap trung thuc la thua nhan no o kieu du lieu chu khong phai
+    #: giả vờ mọi model đều có effort.
+    effort: Literal["low", "medium", "high"] | None = "low"
+    #: Endpoint tuong thich OpenAI. None = dung endpoint mac dinh cua OpenAI.
+    #:
+    #: vLLM va TGI deu phuc vu API tuong thich OpenAI, nen tu host chi la doi mot
+    #: duong dan — khong can adapter moi, khong can port moi.
+    base_url: str | None = None
+    #: Khoa cho endpoint tren. vLLM chap nhan mot khoa gia. None = dung OPENAI_API_KEY.
+    api_key: str | None = None
 
 
 #: gpt-5-mini: context 400K, max output 128K.
@@ -109,3 +122,126 @@ REPLY_TIMEOUT_S = 15.0
 #: Rong hon duong tra loi vi khong ai dang cho, nhung van phai co: mac dinh cua SDK
 #: du de treo ca mot job trong hang doi.
 CHEAP_TIMEOUT_S = 45.0
+
+#: Timeout RIENG cho route `poem`. Rong hon duong tra loi thuong.
+#:
+#: VI SAO PHAI RIENG — mot ngay da mat vi cho nay. Route tho dung chung
+#: `REPLY_TIMEOUT_S = 15s`, va moi lan thu `gpt-5-mini` deu chet o ~15.600 ms. Ket luan
+#: sai rut ra luc do: "API khong goi duoc". Su that: no goi duoc, chi la CHAM.
+#:
+#:     gpt-5-mini «hoa sen»      60.829 ms
+#:     gpt-5-mini «mùa thu HN»   36.718 ms
+#:     gpt-4o-mini                ~1.800 ms
+#:
+#: Model REASONING sinh them token suy luan truoc khi tra loi, nen mot viec sinh dai
+#: nhu lam tho vuot 15s trong khi mot viec cham ngan (`llm.cheap`, CHEAP_TIMEOUT_S=45s,
+#: CUNG la gpt-5-mini) thi khong. Bang chung ro nhat: nguoi cham chay tot ca buoi trong
+#: khi route tho "chet".
+#:
+#: Con so 90s de dung cho model reasoning cham nhat da do duoc. Tho KHONG nam tren
+#: duong phan hoi gap: nguoi dung xin mot bai tho thi cho duoc, va `sinh_tho` sinh cac
+#: ban SONG SONG nen timeout nay khong nhan len theo so ban.
+#:
+#: VAN NEN dung model KHONG reasoning cho route nay — xem `_GIA_OPENAI`.
+POEM_TIMEOUT_S = 90.0
+
+
+_tho: ModelConfig | None = None
+
+
+def model_cho(route: Route) -> ModelConfig:
+    """Model cua mot route. Duong DUY NHAT de lay ModelConfig luc chay.
+
+    Route `poem` doc config nen no KHONG the nam trong `MODELS` — dict do dung o cap
+    module, va doc config luc import bien moi lenh `import llm.models` thanh mot cho
+    co the chet vi thieu bien moi truong, ke ca trong test khong dung toi route nay.
+    Cung ly do voi `get_reranker()` trong llm/reranker.py.
+    """
+    if route != "poem":
+        return MODELS[route]
+    global _tho
+    if _tho is None:
+        _tho = _model_tho()
+    return _tho
+
+
+#: Bang gia cac model OpenAI dung duoc cho route `poem`. USD / 1M token.
+#:
+#: TOKEN SUY LUAN TINH THEO GIA OUTPUT. Day la cho de nham khi so gia: `gpt-5-mini`
+#: va `gpt-5-nano` la model reasoning, chung sinh them token suy luan va bi tinh tien
+#: nhu output. `gpt-4o-mini` khong sinh token nao nhu vay, nen chi phi THUC TE cua no
+#: co the thap hon con so $0,60 goi y khi so voi $2,00 cua gpt-5-mini.
+#:
+#: Voi viec lam tho thi suy luan nhieu buoc gan nhu khong giup gi — luat tho da duoc
+#: cuong che bang code trong `tho/luat.py`, khong phai bang suy luan cua model.
+#:
+#: CANH BAO VE MODEL REASONING (cot cuoi = True): chung CHAM HON NHIEU LAN cho viec
+#: lam tho, va do 11/09/2026 cho thay KHONG tot hon:
+#:
+#:                    thoi gian      tat dinh
+#:     gpt-4o-mini     ~1.800 ms      35,7/45
+#:     gpt-5-mini    36 toi 61 GIAY  32,6 toi 34,6/45
+#:
+#: Chon chung thi phai co `POEM_TIMEOUT_S` du rong — voi timeout 15s cu thi route tho
+#: hong IM LANG va log chi hien `APITimeoutError`.
+#:
+#: GIA CO THE DA DOI. Kiem lai truoc khi dua vao bao cao chi phi.
+_GIA_OPENAI: dict[str, tuple[float, float, float, bool]] = {
+    # id: (price_in, price_cached_in, price_out, la_model_reasoning)
+    "gpt-5-mini": (0.25, 0.025, 2.00, True),
+    "gpt-5-nano": (0.05, 0.005, 0.40, True),
+    "gpt-4o-mini": (0.15, 0.075, 0.60, False),
+}
+
+
+def _model_tho() -> ModelConfig:
+    """Route `poem`. Ba duong, theo thu tu uu tien.
+
+    1. POEM_BASE_URL co gia tri -> MODEL TU HOST.
+       vLLM va TGI phuc vu API tuong thich OpenAI nen khong can adapter moi.
+       Gia = 0: chi phi that la GIO GPU, va gio GPU khong quy ve token mot cach
+       trung thuc duoc. HAU QUA PHAI BIET: route nay se khong bao gio lam
+       `DAILY_BUDGET_USD` nhich len, tuc chan ngan sach khong con bao ve gi cho no.
+       `effort=None`: model tu host khong co `reasoning_effort`, gui len la bi tu choi.
+
+    2. POEM_MODEL_ID nam trong `_GIA_OPENAI` -> MODEL OPENAI KHAC.
+       De doi model cho RIENG route tho ma khong dung toi phan con lai cua bot.
+
+    3. Khong cau hinh gi -> DUNG CHUNG model voi ca bot. Mac dinh, chay duoc ngay.
+
+    VI SAO CHI ROUTE NAY duoc doi tu do: moi luat trong SYSTEM_PROMPT deu duoc hieu
+    chuan tren `gpt-5-mini` qua ba ngay do dac (xem docs/plan-truy-hoi-xuyen-ngon-ngu.md).
+    Doi model cho ca bot se lam toan bo so lieu do het gia tri. Route `poem` thi khong
+    dinh gi toi chung: no khong dung SYSTEM_PROMPT, khong goi cong cu, khong qua ReAct.
+    """
+    from config import get_settings
+
+    cai_dat = get_settings()
+
+    if cai_dat.POEM_BASE_URL:
+        return ModelConfig(
+            id=cai_dat.POEM_MODEL_ID,
+            max_tokens=4_000,
+            price_in=0.0,
+            price_cached_in=0.0,
+            price_out=0.0,
+            effort=None,
+            base_url=cai_dat.POEM_BASE_URL,
+            api_key=cai_dat.POEM_API_KEY,
+        )
+
+    gia = _GIA_OPENAI.get(cai_dat.POEM_MODEL_ID)
+    if gia is not None:
+        vao, cache, ra, reasoning = gia
+        return ModelConfig(
+            id=cai_dat.POEM_MODEL_ID,
+            max_tokens=4_000,
+            price_in=vao,
+            price_cached_in=cache,
+            price_out=ra,
+            # Model KHONG phai reasoning thi khong duoc gui `reasoning_effort` —
+            # gpt-4o-mini se tu choi ca request.
+            effort="low" if reasoning else None,
+        )
+
+    return ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI)  # type: ignore[arg-type]

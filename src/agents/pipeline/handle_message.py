@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
 from shared.result import Ok
+from tho.y_dinh import YeuCauTho, nhan_dien
 
 from ..domain.errors import BotError, is_config_error, is_retryable
 from ..domain.message import InboundMessage, scope_of
@@ -51,6 +52,7 @@ from .stages.mention import Ask, Ignore, ShowHelp, help_text, resolve_mention_st
 from .stages.persist import persist_inbound, persist_outbound
 from .stages.ratelimit import RATE_LIMITED_TEXT, Pass, Warn, check_rate_limit
 from .stages.respond import respond
+from .stages.tho import lam_tho
 from .stages.typing_ import start_typing
 
 
@@ -233,6 +235,27 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     #              model re de lam lai viec do la cong them do tre va tien cho thu
     #              vong lap dang lam roi. Lam lai neu do duoc truy van cong cu kem.
     #  9. retrieve Da thanh cong cu trong vong ReAct o stage 12, khong con pre-fetch.
+
+    #  9b. lam tho — DUONG RIENG, khong qua vong ReAct.
+    #
+    #      Dat o day co chu dich: SAU chan ngan sach (lam tho van ton tien) va SAU
+    #      persist (cau hoi khong duoc bien mat), nhung TRUOC recall va ReAct.
+    #
+    #      Mot yeu cau lam tho khong co tai lieu nao de tra. De no di qua vong ReAct
+    #      thi no kich hoat chan 7 ("chua tra ma da dinh tra loi") va ton mot luot goi
+    #      model thua cho MOI bai tho — dung luc tinh nang nay dat muc tieu giam do
+    #      tre. Xem docs/plan-lam-tho-va-tu-host.md muc 1.
+    y_dinh = nhan_dien(mention.text)
+    if isinstance(y_dinh, YeuCauTho):
+        log.info("yeu cau lam tho", the_tho=y_dinh.the_tho)
+        bai = await lam_tho(
+            y_dinh, deps.llm, max_tokens=deps.reply.max_tokens, ctx=ctx, logger=log
+        )
+        await respond(
+            deps.channel, scope, bai, msg.message_id,
+            logger=log, van_ban_nguoi_dung=mention.text,
+        )
+        return Handled(replied=True)
 
     # 10. recall — L1 + L2 + L3. Ba lan doc doc lap nen chay SONG SONG: tuan tu thi
     #     cong thang do tre cua ca ba vao duong phan hoi ma khong duoc gi.

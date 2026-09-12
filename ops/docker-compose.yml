@@ -89,8 +89,59 @@ services:
     ports: ['127.0.0.1:3001:3000']
     depends_on: [prometheus]
 
+  # --- Model tu host cho route `poem` -------------------------------------------
+  #
+  # KHONG chay mac dinh. Bat bang:  docker compose --profile tu-host up vllm
+  #
+  # PHAN CUNG LA DIEU KIEN, KHONG PHAI GOI Y. Model 26B can:
+  #     bf16        ~52 GB VRAM
+  #     int8/fp8    ~26 GB
+  #     int4 (AWQ)  ~13-15 GB
+  # MoE van phai nap TOAN BO expert vao VRAM — phan thua chi nam o phep tinh, khong
+  # nam o bo nho. Cong them KV cache 2-6 GB.
+  #
+  # Do tren may dang phat trien (11/09/2026): RTX 3050 Ti Laptop, 4096 MiB = 4 GB.
+  # THIEU khoang 3,5 lan ngay ca o int4. Model se KHONG NAP NOI — day khong phai van
+  # de toc do. Xem docs/plan-lam-tho-va-tu-host.md muc 0.2.
+  #
+  # Chay tren CPU thi dung: MoE 4B hoat dong sinh duoc 2-8 token/giay, tuc mot bai
+  # luc bat mat 15-60 giay — TE HON con so p95 hien tai, dung thu dang muon giam.
+  vllm:
+    profiles: ['tu-host']
+    image: vllm/vllm-openai:latest
+    command:
+      - '--model=${POEM_MODEL_ID:-google/gemma-4-26b-a4b-it}'
+      # int4 de vua VRAM nho nhat co the. Bo dong nay neu co >= 30 GB.
+      - '--quantization=awq'
+      # Ngu canh ngan: prompt tho ~1 KB, bai tho ~200 token. Dat rong la phi VRAM cho
+      # KV cache ma khong dung toi.
+      - '--max-model-len=4096'
+      - '--gpu-memory-utilization=0.90'
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    volumes:
+      # Cache trong so: khong co dong nay thi moi lan dung container la tai lai vai
+      # chuc GB.
+      - 'hfcache:/root/.cache/huggingface'
+    # 127.0.0.1: y het cac service khac — chua co auth nen khong mo ra ngoai may.
+    ports: ['127.0.0.1:8000:8000']
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8000/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      # Nap 26B tu dia mat vai phut o lan dau. 60 lan x 10s = 10 phut.
+      retries: 60
+
 volumes:
   pgdata:
   redisdata:
   promdata:
   grafanadata:
+  hfcache:

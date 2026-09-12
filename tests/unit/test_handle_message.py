@@ -20,6 +20,7 @@ from agents.pipeline.stages.generate import CONFIG_ERROR_TEXT, FALLBACK_TEXT
 from agents.pipeline.stages.mention import help_text
 from agents.policy.access import AccessRules
 from agents.ports.llm import LlmResult, LlmUsage
+from tho.sinh import SO_BAN
 
 from .fakes import (
     FakeChannel,
@@ -261,3 +262,107 @@ class TestRetryVaCoDaTraLoi:
         assert isinstance(result, Failed)
         assert isinstance(result.error, UpstreamTimeout)
         assert deps.channel.sent == [FALLBACK_TEXT]  # type: ignore[attr-defined]
+
+
+LUC_BAT_DUNG = (
+    "Trâu ơi ta bảo trâu này\n"
+    "Trâu ra ngoài ruộng trâu cày với ta\n"
+    "Cấy cày vốn nghiệp nông gia\n"
+    "Ta đây trâu đấy ai mà quản công"
+)
+
+
+class TestLamTho:
+    """Stage 9b: yeu cau lam tho di DUONG RIENG, khong qua vong ReAct.
+
+    Lam tho la bai toan NGUOC voi phan con lai cua bot. Luat he thong la "KHONG tra
+    loi tu tri nho, moi cau hoi co du kien deu phai tra tai lieu TRUOC", va chan 7
+    trong generate.py cuong che luat do. Mot bai tho khong co tai lieu nao de tra —
+    de no di qua vong ReAct thi no kich hoat chan 7 va ton MOT LUOT GOI MODEL thua
+    cho moi bai tho, dung luc tinh nang nay dat muc tieu giam do tre.
+    """
+
+    async def test_yeu_cau_lam_tho_tra_ve_BAI_THO(self) -> None:
+        channel = FakeChannel()
+        deps = make_deps(llm=FakeLlm(replies=[answer(LUC_BAT_DUNG)]), channel=channel)
+
+        result = await handle_message(make_msg(text="làm cho mình bài lục bát về công cha"), deps)
+
+        assert isinstance(result, Handled)
+        assert channel.sent == [LUC_BAT_DUNG]
+
+    async def test_KHONG_khai_cong_cu_nao_cho_luot_lam_tho(self) -> None:
+        """Khai cong cu la mo duong cho model di tra tai lieu ve "mua thu" — vo nghia,
+        va cong them do tre.
+        """
+        llm = FakeLlm(replies=[answer(LUC_BAT_DUNG)])
+        deps = make_deps(llm=llm, tools=FakeTools())
+
+        await handle_message(make_msg(text="viết giúp mình bài thơ lục bát"), deps)
+
+        assert llm.calls[0]["tools"] == ()
+
+    async def test_dung_prompt_RIENG_chu_khong_phai_SYSTEM_PROMPT(self) -> None:
+        """Luot DAU la giai doan chon chu van; luot viet bai dung prompt tho rieng.
+
+        Ca hai deu KHONG duoc dung SYSTEM_PROMPT chinh: tang `system` dang o
+        12.948/12.960 ky tu, va luat tho chi phuc vu mot route.
+        """
+        llm = FakeLlm(replies=[answer(LUC_BAT_DUNG)])
+        deps = make_deps(llm=llm)
+
+        await handle_message(make_msg(text="làm bài lục bát về mùa thu"), deps)
+
+        assert "LÀM THƠ LỤC BÁT" in llm.calls[0]["system"]
+
+    async def test_bai_SAI_LUAT_thi_bot_sua_lai(self) -> None:
+        """Chan cung bang CODE, khong phai cau chu trong prompt.
+
+        Luot dau sinh `SO_BAN` ban SONG SONG. TAT CA deu sai khung thi moi sua mot
+        vong — tong `SO_BAN + 1` luot goi, nhung DO TRE chi bang hai luot, vi cac ban
+        dau chay cung luc.
+
+        Bam vao hang so `SO_BAN` chu khong ghim con so: ban truoc test nay ghim "3" va
+        no do ngay khi `SO_BAN` len 8, trong khi dieu no muon chung minh khong doi.
+
+        Giai doan "chon chu van truoc" DA TAT mac dinh (do duoc: no keo tong tu
+        69,7 xuong 57,1/100) — xem CHON_VAN_TRUOC trong tho/sinh.py.
+        """
+        sai = "Công cha như núi Thái Sơn cao" + chr(10) + "Nghĩa mẹ như nước trong nguồn chảy ra"
+        # FakeLlm tra ve replies[min(len(calls) - 1, len(replies) - 1)]: moi ban dau
+        # deu sai, luot sau do ra ban dung.
+        llm = FakeLlm(replies=[answer(sai)] * SO_BAN + [answer(LUC_BAT_DUNG)])
+        channel = FakeChannel()
+        deps = make_deps(llm=llm, channel=channel)
+
+        await handle_message(make_msg(text="làm bài lục bát"), deps)
+
+        assert len(llm.calls) == SO_BAN + 1
+        assert channel.sent == [LUC_BAT_DUNG]
+
+    async def test_mot_trong_cac_ban_DUNG_thi_KHONG_ton_vong_sua(self) -> None:
+        """Cho sinh song song an: chi can MOT ban dat la xong.
+
+        So ban la `tho.sinh.SO_BAN`, nang 3 -> 4 ngay 11/09/2026 sau khi do duoc ti le
+        mot ban dung KHUNG 6-8 la 65%. Cac ban chay song song nen ban thu tu khong cong
+        do tre; test nay ghim rang co dung ban dat thi KHONG ton them vong sua nao.
+        """
+        sai = "Công cha như núi Thái Sơn cao" + chr(10) + "Nghĩa mẹ như nước trong nguồn chảy ra"
+        llm = FakeLlm(replies=[answer(sai)] * (SO_BAN - 1) + [answer(LUC_BAT_DUNG)])
+        channel = FakeChannel()
+        deps = make_deps(llm=llm, channel=channel)
+
+        await handle_message(make_msg(text="làm bài lục bát"), deps)
+
+        assert len(llm.calls) == SO_BAN
+        assert channel.sent == [LUC_BAT_DUNG]
+
+    async def test_cau_hoi_THUONG_van_di_duong_cu(self) -> None:
+        """Ca am quan trong nhat: nhan nham thi bot lam tho khi nguoi ta hoi quy dinh."""
+        llm = FakeLlm(replies=[answer("Deadline la 30/11.")])
+        deps = make_deps(llm=llm)
+
+        await handle_message(make_msg(text="deadline bao cao quy 3 la ngay nao"), deps)
+
+        assert "LÀM THƠ" not in llm.calls[0]["system"]
+        assert deps.channel.sent == ["Deadline la 30/11."]  # type: ignore[attr-defined]

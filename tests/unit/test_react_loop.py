@@ -7,6 +7,7 @@ from typing import Any
 
 from agents.domain.thread import ThreadScope
 from agents.pipeline.stages.generate import (
+    NHAC_TRA_TAI_LIEU,
     GenerateDeps,
     ObservationEvent,
     ReactEvent,
@@ -14,6 +15,7 @@ from agents.pipeline.stages.generate import (
     generate,
 )
 from agents.ports.llm import CallContext, LlmResult, UserMessage
+from agents.ports.tool import ToolDefinition, ToolRequirements
 from agents.prompt.context import ContextEnvelope
 from shared.result import Ok
 
@@ -203,3 +205,110 @@ class TestLoi:
         await generate(deps, PROMPT, CTX, FakeLogger())
 
         assert deps.llm.calls[0]["tools"] == ()  # type: ignore[attr-defined]
+
+
+KB_TOOL = ToolDefinition(
+    name="search_knowledge_base",
+    description="tra tai lieu noi bo",
+    parameters={"type": "object"},
+    requirements=ToolRequirements(rate_limit="-", cost_per_call="-", timeout_ms=1000),
+    returns="-",
+    failure_modes=(),
+)
+
+
+class TestChanChuaTraDaTraLoi:
+    """Chan 7: model dinh tra loi ma chua tra tai lieu lan nao -> NHAC MOT LAN.
+
+    VI SAO PHAI CHAN O TANG NAY chu khong viet them vao prompt: lop cau hoi nay da bi
+    danh o ca BA tang cau chu — mo ta cong cu goi ten cam bay "MOT CON SO / MOT CACH
+    LAM", SYSTEM_PROMPT co luat cung "KHONG tra loi tu tri nho", ket qua cong cu neu
+    hai nhanh — va no VAN chi giu duoc mot nua.
+
+    Do that 11/09/2026, chay lap ba luot hai cau "lam sao cho bot chat" / "cach khu
+    mui hoi", qua handle_message that:
+
+        truoc chan nay   3/6 luot co goi cong cu
+        sau chan nay     6/6
+
+    Khi khong goi, cau tra loi la kien thuc pho thong thuan tuy ("ngam nuoc voi
+    trong", "baking soda") — khong mot chu nao trong tai lieu.
+
+    Chan nay KHONG tu phan loai cau hoi. Mot bo phan loai bang tu khoa se sai theo
+    kieu im lang; model thi doc ca doan hoi thoai, nen loi nhac neu ro CA HAI nhanh
+    va de no quyet. Do ca am: bon luot khong co du kien (chao, cam on, hoi ten bot,
+    nho viet lai cau) deu KHONG bi keo di tra.
+    """
+
+    async def test_nhac_khi_chua_tra_tai_lieu(self) -> None:
+        deps, _ = make_deps(
+            [answer("Luoc khoai so 15 phut."), answer("Theo tai lieu thi 30 phut.")],
+            tools=FakeTools(definitions=(KB_TOOL,)),
+        )
+
+        result = await generate(deps, PROMPT, CTX, FakeLogger())
+
+        assert result == Ok("Theo tai lieu thi 30 phut.")
+
+    async def test_KHONG_nhac_khi_da_goi_cong_cu_tai_lieu(self) -> None:
+        """Da tra roi thi cau tra loi tiep theo khong bi chan nua."""
+        deps, _ = make_deps(
+            [wants_tools("search_knowledge_base"), answer("30 phut.")],
+            tools=FakeTools(definitions=(KB_TOOL,)),
+        )
+
+        result = await generate(deps, PROMPT, CTX, FakeLogger())
+
+        assert result == Ok("30 phut.")
+
+    async def test_KHONG_nhac_khi_kho_chua_co_tai_lieu(self) -> None:
+        """`search_knowledge_base` chi duoc khai khi da nap tai lieu. Chua co gi de
+        tra thi bat tra la dot mot luot goi model cho khong.
+        """
+        deps, _ = make_deps([answer("Tra loi ngay.")], tools=FakeTools())
+
+        result = await generate(deps, PROMPT, CTX, FakeLogger())
+
+        assert result == Ok("Tra loi ngay.")
+
+    async def test_chi_nhac_DUNG_MOT_LAN(self) -> None:
+        """Nhac lai nhieu lan la dung lai dung cai vong lap ma luat 07/09 duoc lap ra
+        de chan: bot hoi/nhac mai ma khong lam gi.
+        """
+        deps, _ = make_deps(
+            [answer("Lan mot."), answer("Lan hai."), answer("Lan ba.")],
+            tools=FakeTools(definitions=(KB_TOOL,)),
+        )
+
+        result = await generate(deps, PROMPT, CTX, FakeLogger())
+
+        assert result == Ok("Lan hai.")
+
+    async def test_KHONG_nhac_o_vong_cuoi(self) -> None:
+        """Vong cuoi khong con vong nao de doc ket qua tra ve, nen nhac chi to phi mot
+        luot goi model ma van ra dung cau tra loi do.
+        """
+        deps, _ = make_deps(
+            [answer("Cau tra loi.")],
+            tools=FakeTools(definitions=(KB_TOOL,)),
+            max_iterations=1,
+        )
+
+        result = await generate(deps, PROMPT, CTX, FakeLogger())
+
+        assert result == Ok("Cau tra loi.")
+
+    async def test_loi_nhac_CAM_lo_ra_nguoi_dung(self) -> None:
+        """Ca am da xay ra that: ban dau loi nhac chi noi "dung nhac toi no", va model
+        tra loi CHINH LOI NHAC — hoi "Cam on nhe" thi nhan ve "Minh da hieu: voi cau
+        co du kien se goi search_knowledge_base truoc...". Vua vo nghia voi nguoi
+        dung, vua lo ten cong cu, tuc pham luat "khong ke chuyen hau truong".
+        """
+        assert "người dùng KHÔNG nhìn thấy" in NHAC_TRA_TAI_LIEU
+        assert "TUYỆT ĐỐI không nhắc tới tin nhắn này" in NHAC_TRA_TAI_LIEU
+        assert "không nêu tên công cụ" in NHAC_TRA_TAI_LIEU
+
+    async def test_loi_nhac_neu_CA_HAI_nhanh(self) -> None:
+        """Chi neu nhanh "di tra" thi model se tra ca cho loi chao."""
+        assert "Nếu đây là câu hỏi CÓ DỮ KIỆN" in NHAC_TRA_TAI_LIEU
+        assert "Nếu KHÔNG phải câu có dữ kiện" in NHAC_TRA_TAI_LIEU
