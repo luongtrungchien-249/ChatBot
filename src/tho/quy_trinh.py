@@ -81,6 +81,18 @@ TEN_BUOC: dict[Buoc, str] = {
     "xuat_ban": "Xuất bản",
 }
 
+#: Ten DE RIENG cho that ngon tu tuyet — nhung buoc ma ten mac dinh se NOI SAI.
+#:
+#: `TEN_BUOC` viet theo luc bat vi do la the mac dinh va la the ma nguoi dung mo ta quy
+#: trinh. Nhung in "Xay cau luc" hay "Kiem tra luat luc bat" khi dang lam mot bai that
+#: ngon tu tuyet la mot cau SAI, va mot bang vet ma noi sai thi mat het gia tri — cung
+#: ly do voi luat 2 o dau tep.
+TEN_TNTT: dict[Buoc, str] = {
+    "sinh_cau": "Xây câu thơ",
+    "gieo_van": "Gieo vần cuối câu 1-2-4",
+    "kiem_luat": "Kiểm tra luật tứ tuyệt",
+}
+
 #: Ai chiu trach nhiem mot buoc: code TAT DINH hay mot luot goi model.
 #:
 #: Phan biet nay khong phai de trang tri. Cai gi `luat` lam thi lap lai duoc, test duoc,
@@ -111,6 +123,9 @@ class VetBuoc:
     ms: float
     so_lan_goi: int
     tom_tat: str
+    #: Ten hien thi. Mang theo trong vet chu khong tra cuu luc IN ra: the tho quyet dinh
+    #: ten, ma `bang_vet` thi khong biet the tho — nen tra cuu luc in se lai in sai.
+    ten: str
     chi_tiet: tuple[VetCon, ...] = ()
 
 
@@ -128,6 +143,11 @@ class SoVet:
     """So ghi vet, truyen doc theo mot luot sinh tho."""
 
     _vet: list[VetBuoc] = field(default_factory=list)
+    #: Ten de rieng, de len tren `TEN_BUOC`. Rong = dung ten mac dinh (luc bat).
+    ten_rieng: dict[Buoc, str] = field(default_factory=dict)
+
+    def _ten(self, buoc: Buoc) -> str:
+        return self.ten_rieng.get(buoc) or TEN_BUOC[buoc]
 
     @contextmanager
     def do(self, buoc: Buoc, ai_lam: AiLam) -> Iterator[_Ghi]:
@@ -149,6 +169,7 @@ class SoVet:
                     ms=(time.monotonic() - t0) * 1000,
                     so_lan_goi=ghi.so_lan_goi,
                     tom_tat=ghi.tom_tat,
+                    ten=self._ten(buoc),
                     chi_tiet=ghi.chi_tiet,
                 )
             )
@@ -161,7 +182,15 @@ class SoVet:
         bang se dem mot luot goi thanh ba. `noi` phai chi ro no chay chung voi cai gi.
         """
         self._vet.append(
-            VetBuoc(buoc=buoc, ai_lam=ai_lam, da_chay=True, ms=0.0, so_lan_goi=0, tom_tat=noi)
+            VetBuoc(
+                buoc=buoc,
+                ai_lam=ai_lam,
+                da_chay=True,
+                ms=0.0,
+                so_lan_goi=0,
+                tom_tat=noi,
+                ten=self._ten(buoc),
+            )
         )
 
     def ghi(
@@ -189,6 +218,7 @@ class SoVet:
                 ms=ms,
                 so_lan_goi=so_lan_goi,
                 tom_tat=tom_tat,
+                ten=self._ten(buoc),
                 chi_tiet=chi_tiet,
             )
         )
@@ -223,6 +253,7 @@ class SoVet:
                 ms=0.0,
                 so_lan_goi=0,
                 tom_tat=ly_do,
+                ten=self._ten(buoc),
             )
         )
 
@@ -230,7 +261,12 @@ class SoVet:
         return tuple(self._vet)
 
 
-def vet_kiem_luat(bai: str, loi: list[Loi], loi_bang_trac: tuple[Loi, ...]) -> tuple[VetCon, ...]:
+def vet_kiem_luat(
+    bai: str,
+    loi: list[Loi],
+    loi_bang_trac: tuple[Loi, ...],
+    the_tho: str = "luc_bat",
+) -> tuple[VetCon, ...]:
     """Bon muc ①②③④ cua buoc 7, SUY RA tu ket qua kiem da co.
 
     KHONG goi lai bo kiem. Suy tu `loi` nghia la vet khong the lech voi thuc te; goi
@@ -248,6 +284,9 @@ def vet_kiem_luat(bai: str, loi: list[Loi], loi_bang_trac: tuple[Loi, ...]) -> t
     # dung dieu do, neu khong nguoi doc se tuong bai da dat luat bang-trac.
     bang_trac = [x for x in loi if x.loai == "bang_trac"] or list(loi_bang_trac)
 
+    # Noi dung KHUNG cho dung the. "dung khung 6-8" tren mot bai that ngon tu tuyet la
+    # mot cau SAI, va sai ngay trong cai bang duoc dung de kiem tra su that.
+    khung = "6-8" if the_tho == "luc_bat" else "7 chữ"
     cau = [d.strip() for d in bai.strip().split("\n") if d.strip()]
     gay = [(i, kiem_nhip(c)) for i, c in enumerate(cau, 1)]
     gay_that = [(i, v) for i, v in gay if v is not None]
@@ -258,7 +297,7 @@ def vet_kiem_luat(bai: str, loi: list[Loi], loi_bang_trac: tuple[Loi, ...]) -> t
             ten="① số tiếng",
             dat=not so_tieng,
             tom_tat=(
-                f"{len(cau)} câu, đúng khung 6-8"
+                f"{len(cau)} câu, đúng khung {khung}"
                 if not so_tieng
                 else f"{len(so_tieng)} lỗi: "
                 + "; ".join(f"câu {x.cau} {x.mo_ta}" for x in so_tieng)
@@ -268,7 +307,7 @@ def vet_kiem_luat(bai: str, loi: list[Loi], loi_bang_trac: tuple[Loi, ...]) -> t
             ten="② vần",
             dat=not van,
             tom_tat=(
-                "mạch vần liền, không đứt"
+                ("mạch vần liền, không đứt" if the_tho == "luc_bat" else "hiệp vần đủ")
                 if not van
                 else f"{len(van)} chỗ đứt: " + "; ".join(f"câu {x.cau} {x.mo_ta}" for x in van)
             ),
@@ -343,7 +382,7 @@ def bang_vet(vet: tuple[VetBuoc, ...]) -> str:
         gio = f"{v.ms:7.1f}ms" if v.da_chay else "      -- "
         goi = f" x{v.so_lan_goi}" if v.so_lan_goi else "   "
         dong.append(
-            f"{_danh_dau(v)} {i:2}. {TEN_BUOC[v.buoc]:<28} {ai} {gio}{goi}  {v.tom_tat}"
+            f"{_danh_dau(v)} {i:2}. {v.ten:<28} {ai} {gio}{goi}  {v.tom_tat}"
         )
         for c in v.chi_tiet:
             dau = "v" if c.dat is True else "x" if c.dat is False else "?"

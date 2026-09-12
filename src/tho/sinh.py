@@ -34,6 +34,9 @@ from .chon_van import (
     yeu_cau_chon_van,
     yeu_cau_viet_bai,
 )
+from .lap_y import doc_mach_y, yeu_cau_lap_y
+from .lap_y import huong_dan as huong_dan_lap_y
+from .lap_y import yeu_cau_viet_bai as yeu_cau_viet_bai_co_mach
 from .luat import Loi, kiem_luc_bat, kiem_that_ngon_tu_tuyet
 from .prompt import (
     _MAU_LUC_BAT,
@@ -46,9 +49,40 @@ from .prompt import (
     yeu_cau,
     yeu_cau_chon,
 )
-from .quy_trinh import SoVet, VetBuoc, VetCon, vet_kiem_luat
+from .quy_trinh import TEN_TNTT, SoVet, VetBuoc, VetCon, vet_kiem_luat
 from .tu_vung import cum_kha_nghi, cum_nghi_be
 from .y_dinh import TheTho, YeuCauTho
+
+#: BUOC 2: lap y thanh mot LUOT GOI RIENG truoc khi viet cau.
+#:
+#: DA THU VA DA TAT, 13/09/2026. A/B n=40 cap GHEP THEO CHU DE, HAI luot doc lap,
+#: cham ca hai thang (45 tat dinh + 40 nguoi cham). Nguoi cham chay 160/160 khong hong.
+#:
+#:                     luot 1            luot 2
+#:     ngon ngu      +0,33 +/- 0,72   -0,90 +/- 0,90    <- DAO DAU
+#:     sang tao      +0,03 +/- 0,33   -0,47 +/- 0,33    <- DAO DAU
+#:     y nghia       +0,35 +/- 0,35   -0,28 +/- 0,32    <- DAO DAU
+#:     TONG /40      +1,38 +/- 1,81   -2,10 +/- 2,13
+#:     tat dinh /45  -0,56 +/- 2,86   -0,22 +/- 2,31
+#:     do tre        +1.029 ms        +949 ms
+#:     luot goi      4,15 -> 5,25     4,12 -> 5,15
+#:
+#: HAI LUOT NOI NGUOC NHAU. Luot 1 bao lap y lam ngon ngu TOT len, luot 2 bao no lam
+#: ngon ngu TE di — cung cau hinh, cung 40 chu de, chi khac lan chay.
+#:
+#: DAY LA LY DO PHAI CHAY HAI LUOT. Chi lay luot 1 thi ket luan se la "+1,38 tong,
+#: y nghia +0,35 +/- 0,35 — bat len di", va ta se ship mot thu khong co that. Du an nay
+#: da mot lan bao "61,0 -> 69,1 trong mot ngay" tren mot luot chay duy nhat, roi phai
+#: rut lai.
+#:
+#: KET LUAN: khong co hieu ung do duoc, ma gia thi co that — p50 1.282 -> 2.172 ms
+#: (+70%) va +1,1 luot goi model moi bai, tren mot tinh nang co muc tieu GIAM do tre.
+#: Giu TAT.
+#:
+#: Giu code lai (tho/lap_y.py) vi gia thuyet khong sai, chi la khong do duoc gi o
+#: gpt-4o-mini. Muon thu lai voi model khac thi bat `lap_y=True` va do lai TU DAU —
+#: con so tren la cua gpt-4o-mini.
+LAP_Y = False
 
 #: Chon CHU VAN truoc khi viet cau — DA THU VA DA TAT.
 #:
@@ -476,6 +510,20 @@ def _sach(bai: str) -> str:
     return "\n".join(d.strip() for d in bai.strip().split("\n") if d.strip())
 
 
+async def _lap_y(chu_de: str, goi_model: GoiModel) -> tuple[str | None, int]:
+    """Mot luot goi: chu de -> mach {SO_Y} y. None = khong doc duoc, BO QUA buoc nay.
+
+    Chi thu MOT lan. `_chon_van_truoc` thu hai lan vi bo van hong lam hong ca bai; o
+    day mach y hong thi ta chi mat mot goi y, va de bai cu van dung duoc. Thu lai chi
+    de cong them do tre vao dung cai tinh nang co muc tieu GIAM do tre.
+    """
+    try:
+        raw = await goi_model(huong_dan_lap_y(), [yeu_cau_lap_y(chu_de)])
+    except Exception:
+        return None, 0
+    return doc_mach_y(raw), 1
+
+
 async def _chon_van_truoc(chu_de: str, goi_model: GoiModel) -> tuple[str | None, int]:
     """Giai doan 1. Tra (yeu cau cho giai doan 2, so lan goi model).
 
@@ -508,6 +556,7 @@ async def sinh_tho(
     chon_bang_nguoi_cham: bool = CHON_BANG_NGUOI_CHAM,
     cham_model: GoiModel | None = None,
     chon_van_truoc: bool = CHON_VAN_TRUOC,
+    lap_y: bool = LAP_Y,
 ) -> KetQua:
     """Sinh mot bai tho dung luat, hoac bai tot nhat lam duoc kem loi con lai.
 
@@ -520,7 +569,9 @@ async def sinh_tho(
       2. ban do con sai KHUNG thi sua, co VE RA cho sai;
       3. van sai khung thi CAT ve nhung cap 6-8 dung.
     """
-    so = SoVet()
+    # Ten de rieng cho that ngon tu tuyet: TEN_BUOC viet theo luc bat, in nguyen xi
+    # len mot bai tu tuyet la vet noi sai.
+    so = SoVet(ten_rieng=dict(TEN_TNTT) if the_tho != "luc_bat" else {})
 
     # ================= BUOC 1: xac dinh yeu cau =================
     with so.do("yeu_cau", "luat") as g:
@@ -537,15 +588,22 @@ async def sinh_tho(
 
     # ================= BUOC 2: lap y / mach cam xuc =================
     #
-    # CHUA THI CONG, va vet phai noi that dieu do. Da co mot ban thu gan giong ("so
-    # tay" — bat model tu ghi y truoc khi viet, trong CUNG mot luot): ngon ngu 4,75 ->
-    # 4,78, tuc chim trong nhieu. Ban lam thanh mot LUOT RIENG chua duoc do lan nao va
-    # nam o §5 (B1) cua docs/plan-quy-trinh-10-buoc.md.
-    so.bo_qua(
-        "lap_y",
-        "model",
-        "chưa thi công — mạch ý hiện nằm trong prompt (mục CẢM XÚC), không phải lượt gọi riêng",
-    )
+    # Sau co `LAP_Y`, mac dinh TAT. Xem tho/lap_y.py de biet vi sao no van dang tat.
+    mach: str | None = None
+    if lap_y:
+        with so.do("lap_y", "model") as g:
+            mach, them = await _lap_y(chu_de, goi_model)
+            so_lan_goi += them
+            g.so_lan_goi = them
+            if mach is not None:
+                dau_bai = yeu_cau_viet_bai_co_mach(mach, chu_de)
+            g.tom_tat = mach or "không đọc được mạch ý — BỎ QUA, viết một mạch như cũ"
+    else:
+        so.bo_qua(
+            "lap_y",
+            "model",
+            "đang TẮT (LAP_Y=False) — mạch ý vẫn nằm trong prompt, chưa là lượt gọi riêng",
+        )
 
     # ================= BUOC 3: chon hinh anh & tu khoa =================
     #
@@ -561,7 +619,13 @@ async def sinh_tho(
             so_lan_goi += them
             g.so_lan_goi = them
             if yeu_cau_moi is not None:
+                # `yeu_cau_viet_bai` cua chon_van.py dung lai de bai TU DAU tu `chu_de`,
+                # nen no XOA mat mach y cua buoc 2. Hai co nay deu dang tat, nhung ngay
+                # ai do bat ca hai thi buoc 2 se ton mot luot goi model roi bi nuot im
+                # lang — kieu hong te nhat: ton tien, khong bao loi, khong ai thay.
                 dau_bai = yeu_cau_moi
+                if mach is not None:
+                    dau_bai = f"{dau_bai}\n\nMạch cảm xúc gợi ý: {mach}"
             g.tom_tat = "chọn CHỮ VẦN trước khi viết câu" + (
                 "" if yeu_cau_moi is not None else " — không đọc được bộ vần, dùng đề bài gốc"
             )
@@ -622,7 +686,9 @@ async def sinh_tho(
     # Vet nay mo ta BAN NHAP — dung nhu so do cua nguoi dung ("sau khi tao ban nhap,
     # can kiem tra"). Trang thai CUOI CUNG nam o vet buoc 10.
     with so.do("kiem_luat", "luat") as g:
-        g.chi_tiet = vet_kiem_luat(tot_nhat, loi_tot_nhat, _loi_bang_trac(the_tho, tot_nhat))
+        g.chi_tiet = vet_kiem_luat(
+            tot_nhat, loi_tot_nhat, _loi_bang_trac(the_tho, tot_nhat), the_tho
+        )
         g.tom_tat = (
             f"bản nháp tốt nhất trong {len(ung_vien)} bản · còn {len(loi_tot_nhat)} lỗi chặn"
         )
@@ -686,10 +752,16 @@ async def sinh_tho(
             ),
             VetCon(
                 ten="mạch nội dung",
-                # None, KHONG phai True. Chua co bo do nao cho muc nay — bao "dat" o
-                # day la dung cai loi da lam hong hai phep do truoc day.
+                # None, KHONG phai True — va gio co mot ly do CU THE chu khong con
+                # la "chua lam". Xem tho/mach_y.py: bo do bang luat da duoc dung va do,
+                # bao nham 19,50% tren Truyen Kieu, trong khi nguong de duoc tham gia
+                # xep hang la 1,60%. Nen no khong duoc noi vao dau, va muc nay van la
+                # KHONG KIEM DUOC.
                 dat=None,
-                tom_tat="chưa thi công — không kiểm được mạch ý giữa các câu",
+                tom_tat=(
+                    "không kiểm được — bộ dò bằng luật đã thử và trượt "
+                    "(báo nhầm 19,50% trên Truyện Kiều, ngưỡng 1,60%)"
+                ),
             ),
         )
         g.tom_tat = f"{len(ung_vien)} bản qua được bộ lọc cứng"
@@ -808,7 +880,7 @@ async def sinh_tho(
     # Vet nay mo ta bai CUOI CUNG, doi lai voi vet buoc 7 (mo ta ban nhap).
     loi_bt = _loi_bang_trac(the_tho, tot_nhat)
     with so.do("xuat_ban", "luat") as g:
-        g.chi_tiet = vet_kiem_luat(tot_nhat, loi_tot_nhat, loi_bt)
+        g.chi_tiet = vet_kiem_luat(tot_nhat, loi_tot_nhat, loi_bt, the_tho)
         so_cau = len([d for d in tot_nhat.split(chr(10)) if d.strip()])
         # Noi ro co kem cau bao loi khong: `tra_loi()` gan them mot cau khi con loi, va
         # do la thu nguoi dung nhin thay. Xem luat "khong bao gio im lang" o dau tep.

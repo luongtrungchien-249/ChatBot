@@ -276,3 +276,93 @@ class TestDanChuDeKhongCon:
 
         assert isinstance(y, YeuCauTho)
         assert y.chu_de == mong_doi
+
+
+class TestVetKhongNoiSaiTheTho:
+    """`TEN_BUOC` viet theo luc bat. In nguyen xi len mot bai tu tuyet la vet NOI SAI.
+
+    Ba cau sai da chay that truoc khi co test nay:
+        "4. Xây câu lục"            — tu tuyet khong co cau luc
+        "7. Kiểm tra luật lục bát"  — dang kiem luat tu tuyet
+        "① số tiếng: đúng khung 6-8" — bai 7 chu, khong phai 6-8
+
+    Mot bang vet ma noi sai thi mat het gia tri cua no.
+    """
+
+    TNTT = (
+        "Nam quốc sơn hà Nam đế cư\n"
+        "Tiệt nhiên định phận tại thiên thư\n"
+        "Như hà nghịch lỗ lai xâm phạm\n"
+        "Nhữ đẳng hành khan thủ bại hư"
+    )
+
+    async def test_tu_tuyet_KHONG_in_ten_cua_luc_bat(self) -> None:
+        goi, _ = model_tra(self.TNTT)
+
+        kq = await sinh_tho("that_ngon_tu_tuyet", "", goi, so_ban=1)
+        ten = {v.buoc: v.ten for v in kq.vet}
+
+        assert "lục" not in ten["sinh_cau"]
+        assert "bát" not in ten["gieo_van"]
+        assert "lục bát" not in ten["kiem_luat"]
+
+    async def test_tu_tuyet_KHONG_bao_dung_khung_6_8(self) -> None:
+        goi, _ = model_tra(self.TNTT)
+
+        kq = await sinh_tho("that_ngon_tu_tuyet", "", goi, so_ban=1)
+        buoc7 = next(v for v in kq.vet if v.buoc == "kiem_luat")
+
+        assert "6-8" not in buoc7.chi_tiet[0].tom_tat
+        assert "7 chữ" in buoc7.chi_tiet[0].tom_tat
+
+    async def test_luc_bat_VAN_giu_dung_ten_cua_no(self) -> None:
+        """Sua cho thể kia khong duoc lam mat ten cua the mac dinh."""
+        goi, _ = model_tra(DUNG_LUAT)
+
+        kq = await sinh_tho("luc_bat", "", goi, so_ban=1, chon_van_truoc=False)
+        ten = {v.buoc: v.ten for v in kq.vet}
+        buoc7 = next(v for v in kq.vet if v.buoc == "kiem_luat")
+
+        assert ten["sinh_cau"] == "Xây câu lục"
+        assert ten["kiem_luat"] == "Kiểm tra luật lục bát"
+        assert "6-8" in buoc7.chi_tiet[0].tom_tat
+
+
+class TestDu10VetTrenMOINHANH:
+    """Bat bien "du 10 vet, dung thu tu, tong luot goi khop" tren MOI nhanh re.
+
+    Ba test o `TestDu10Buoc` chi phu duong mac dinh. Nhung nhanh co the lam rung mot
+    vet lai la nhung nhanh CO CO: `lap_y`, `chon_van_truoc`, va the tho khac. Bat bien
+    nay dung hom nay tren ca nam nhanh — test o day la de no khong am tham hong vao
+    ngay ai do sua mot trong cac nhanh do.
+    """
+
+    LB = "Trâu ơi ta bảo trâu này\nTrâu ra ngoài ruộng trâu cày với ta"
+    TNTT = (
+        "Nam quốc sơn hà Nam đế cư\n"
+        "Tiệt nhiên định phận tại thiên thư\n"
+        "Như hà nghịch lỗ lai xâm phạm\n"
+        "Nhữ đẳng hành khan thủ bại hư"
+    )
+    MACH = "Cội nguồn → Cha ông → Hy sinh → Hòa bình → Nhớ nguồn"
+    BO_VAN = "ay: này, cày, bay\nà: ta, xa, hoa"
+
+    @pytest.mark.parametrize(
+        ("ten", "the_tho", "kw", "ban"),
+        [
+            ("lập ý BẬT", "luc_bat", {"lap_y": True, "chon_van_truoc": False}, (MACH, LB)),
+            ("lập ý HỎNG", "luc_bat", {"lap_y": True, "chon_van_truoc": False}, ("rác", LB)),
+            ("cả hai cờ", "luc_bat", {"lap_y": True, "chon_van_truoc": True}, (MACH, BO_VAN, LB)),
+            ("chọn vần", "luc_bat", {"lap_y": False, "chon_van_truoc": True}, (BO_VAN, LB)),
+            ("tứ tuyệt", "that_ngon_tu_tuyet", {}, (TNTT,)),
+        ],
+    )
+    async def test_du_10_vet_va_tong_luot_goi_khop(
+        self, ten: str, the_tho: str, kw: dict[str, bool], ban: tuple[str, ...]
+    ) -> None:
+        goi, _ = model_tra(*ban)
+
+        kq = await sinh_tho(the_tho, "cha mẹ", goi, so_ban=1, **kw)  # type: ignore[arg-type]
+
+        assert tuple(v.buoc for v in kq.vet) == THU_TU, ten
+        assert sum(v.so_lan_goi for v in kq.vet) == kq.so_lan_goi, ten

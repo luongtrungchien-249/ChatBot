@@ -1,6 +1,7 @@
 # Sản xuất thơ theo đúng trình tự 10 bước — plan
 
-> Ngày lập: 13/09/2026. Trạng thái: **mục tiêu A đã thi công** (kết quả ở §8); mục tiêu B chưa.
+> Ngày lập: 13/09/2026. Trạng thái: **xong**. Mục tiêu A đã thi công (§8). Mục tiêu B:
+> B1 và B3 đã đo và đều KHÔNG dùng (§9.1, §9.3); B2 dừng theo đúng cổng của plan (§9.2).
 >
 > Yêu cầu: *"Bạn sửa lại chi tiết từng phần trong dự án này của tôi để có thể sản xuất
 > thơ theo đúng yêu cầu trình tự từng bước phải như trên / lập plan trước khi sửa."*
@@ -209,14 +210,21 @@ Chỉ khi bộ dò tất định thất bại mới tính tới người chấm 
 
 ## 7. Thứ tự thi công
 
-1. `tho/quy_trinh.py` + `VetBuoc` + test rỗng
-2. Bọc vết vào `sinh_tho` (không đổi logic) — chạy lại 723 test
-3. Tách vết con bước 7 trong `luat.py`
-4. `YeuCauTho` thêm trường thông điệp
-5. Cờ `THO_IN_VET` + `ops/soi_quy_trinh.py`
-6. **Đo nghiệm thu A** (n≥40 × 2) → chốt A
-7. B1 sau cờ tắt + A/B → chỉ đi tiếp nếu thắng
-8. B2, B3 tương tự
+1. ✅ `tho/quy_trinh.py` + `VetBuoc` + test rỗng
+2. ✅ Bọc vết vào `sinh_tho` (không đổi logic) — chạy lại toàn bộ test
+3. ✅ Tách vết con bước 7 — **làm ở `quy_trinh.py`, không ở `luat.py`** (xem ghi chú dưới)
+4. ✅ `YeuCauTho` thêm trường thông điệp
+5. ✅ `ops/soi_quy_trinh.py` — **không làm cờ `THO_IN_VET`** (xem §4.4)
+6. ✅ **Đo nghiệm thu A** (n≥40 × 2) → §8.2
+7. ✅ B1 sau cờ tắt + A/B → §9.1, **không thắng**
+8. ✅ B3 → §9.3, **trượt**. ⛔ B2 → §9.2, dừng theo cổng ở bước 7
+
+> **Lệch ở bước 3, có chủ đích.** Plan định tách bốn mục ①②③④ ngay trong `luat.py`. Làm
+> vậy phải đổi chữ ký `kiem_luc_bat` — một hàm thuần, đã hiệu chuẩn trên Truyện Kiều, có
+> hàng chục test ghim. Đổi nó để lấy một dòng hiển thị là trả giá quá đắt. Thay vào đó
+> `vet_kiem_luat` **suy ra** bốn mục từ danh sách `Loi` đã có: cho đúng kết quả, không
+> chạm vào mã đang ổn, và vết không thể lệch với cái đã dùng để chọn bài (vì cùng một
+> nguồn). Lý do này cũng nằm trong docstring của `vet_kiem_luat`.
 
 Bước 1-6 rủi ro gần như bằng không và làm được trong một lượt. Bước 7-8 mỗi cái là một
 thí nghiệm riêng có thể kết luận "không dùng" — và kết luận đó cũng là kết quả hợp lệ,
@@ -288,3 +296,93 @@ thấy được**. Lỗi này không một phép chấm nào bắt được — 
 
 §5 (B1 lập ý, B2 hình ảnh, B3 mạch nội dung) — chưa động tới, đúng như plan: mỗi cái là
 một thí nghiệm riêng, sau một cờ tắt mặc định, và phải trả bằng A/B n≥40 × 2 lượt.
+
+---
+
+## 9. Kết quả — mục tiêu B
+
+### 9.0 Sửa lỗi trước khi làm tiếp (13/09/2026)
+
+Ba lỗi, đều do chính bảng vết phơi ra hoặc do rà lại phần vừa viết:
+
+| lỗi | hậu quả |
+|---|---|
+| `_DAN_CHU_DE` chỉ cắt một dẫn | đề bài gửi lên model là *"Chủ đề: **chủ đề** uống nước nhớ nguồn"* (§8.3) |
+| vết in "Kiểm tra luật **lục bát**", "Xây câu **lục**", "đúng khung **6-8**" cho bài thất ngôn tứ tuyệt | bảng vết **nói sai sự thật** trên đường TNTT — đúng thứ làm mất toàn bộ giá trị của nó |
+| một khối chú thích bị lặp trong `luat.py` | không đổi hành vi |
+
+Lỗi thứ hai đã sửa bằng cách cho mỗi vết **mang theo tên hiển thị của nó** (`VetBuoc.ten`)
+thay vì tra bảng lúc in — `bang_vet` không biết thể thơ, nên tra lúc in thì lại in sai.
+
+### 9.1 B1 — lập ý thành một lượt gọi riêng: **ĐÃ ĐO, KHÔNG BẬT**
+
+Thi công sau cờ `LAP_Y=False` (`src/tho/lap_y.py`). A/B **n=40 cặp ghép theo chủ đề**,
+**hai lượt độc lập**, chấm bằng **cả hai thang** — 45 tất định (hình thức) và 40 người
+chấm (nội dung), vì lập ý nhắm vào nội dung nên đo bằng thang 45 thôi là dùng sai dụng cụ.
+
+| | lượt 1 | lượt 2 |
+|---|---|---|
+| ngôn ngữ | **+0,33 ± 0,72** | **−0,90 ± 0,90** |
+| sáng tạo | +0,03 ± 0,33 | **−0,47 ± 0,33** |
+| ý nghĩa | +0,35 ± 0,35 | −0,28 ± 0,32 |
+| TỔNG /40 | +1,38 ± 1,81 | −2,10 ± 2,13 |
+| tất định /45 | −0,56 ± 2,86 | −0,22 ± 2,31 |
+| độ trễ | **+1 029 ms** | **+949 ms** |
+| lượt gọi model | 4,15 → 5,25 | 4,12 → 5,15 |
+
+**Hai lượt nói ngược nhau** trên cả ba mục quan trọng nhất — cùng cấu hình, cùng 40 chủ
+đề, chỉ khác lần chạy.
+
+Điều đáng ghi nhất không phải kết quả, mà là **cách nó suýt sai**. Lượt 1 cho ý nghĩa
++0,35 ± 0,35 — vừa đủ "có ý nghĩa thống kê" — và TỔNG +1,38. Dừng ở đó thì kết luận là
+*"bật lên"*. Lượt 2 lật ngược hẳn. Chạy một lượt thì dự án này đã ship một cái tốt không
+có thật, **lần thứ hai**.
+
+**Kết luận: giữ `LAP_Y=False`.** Không có hiệu ứng đo được, mà giá thì có thật: p50
+1 282 → 2 172 ms (**+70 %**) trên một tính năng có mục tiêu *giảm* độ trễ.
+
+Một phát hiện phụ, đáng kể: **người chấm chạy 160/160 không hỏng.** Điều đó bác bỏ niềm
+tin cũ trong dự án rằng thang 100 "không đo được vì người chấm hay timeout" — nó đo
+được, và con số 21/30 timeout hôm trước là một sự cố nhất thời chứ không phải một giới
+hạn. Mọi kết luận trước đây bị chặn vì lý do đó nên được đo lại.
+
+### 9.2 B2 — chọn hình ảnh: **KHÔNG LÀM**
+
+Plan đặt cổng ở §5: *"Chỉ làm nếu B1 thắng."* B1 không thắng, nên B2 dừng ở đây — đúng
+kỷ luật của chính plan này, không phải vì hết thời gian.
+
+Nhắc lại lý do cái cổng đó tồn tại: `CHON_VAN_TRUOC` cũng đúng hình dạng "sinh gợi ý
+trước rồi mới viết câu" và làm mất 12,6 điểm. Hai phép đo B1 vừa cho thấy thêm rằng
+ngay cả phiên bản *không ràng buộc gì* cũng không mua được gì bằng một lượt gọi thêm.
+
+### 9.3 B3 — mạch nội dung bằng luật: **ĐÃ THỬ, TRƯỢT, KHÔNG DÙNG**
+
+Đây là mục người dùng nêu đích danh (*"câu 1 nói cha, câu 3 đột nhiên nói biển"*).
+Làm bằng luật trước, đúng như plan: bảng **trường nghĩa** 10 nhóm tự soạn, một câu bị
+gọi là lạc khi nó chạm vào ít nhất một trường mà không chia trường nào với câu khác.
+
+Hiệu chuẩn trên Truyện Kiều, 1 626 cửa sổ 4 câu — **thơ đúng chuẩn, nên mọi báo đều là
+báo nhầm**:
+
+| cách định nghĩa "lạc" | báo nhầm |
+|---|---|
+| v1 không chia trường với bất kỳ câu nào | 77,31 % |
+| v2 thêm điều kiện ≥ 3 câu nhận ra trường | 31,30 % |
+| v3 chỉ xét khi bài có **trường trội** (≥ 2 câu) | **19,50 %** |
+| v4 trường trội phải phủ ≥ nửa số câu | 19,50 % |
+
+Ngưỡng để một bộ dò được phép tham gia **xếp hạng** trong dự án này là mức của
+`cum_nghi_be`: **1,60 %**. Cách tốt nhất tệ hơn **12 lần**. Và 19,50 % là **cận dưới**,
+không phải ước lượng — đo trên thơ cổ điển, nơi các câu vốn chặt mạch hơn thơ bot sinh ra.
+
+**Kết luận: không nối vào `_xep_hang`.** Vết bước 8 giữ `dat=None` cho mục *mạch nội
+dung*, nhưng lời giải thích đổi từ "chưa thi công" sang nêu thẳng số đo. Code giữ lại
+(`src/tho/mach_y.py`) theo đúng nếp của `chon_van.py`: để lần sau ai đó định làm lại thì
+đọc được con số thay vì thử lại từ đầu.
+
+Điều đáng ghi thêm: **thêm từ vào bảng không cứu được**. Thêm từ làm mọi câu nhận ra
+nhiều trường hơn, tức bộ dò báo ít đi vì lý do sai chứ không phải vì nó chính xác hơn.
+Muốn làm được thật thì cần vector nghĩa.
+
+Có 11 test, trong đó hai test ghim đúng ràng buộc quan trọng nhất: `_xep_hang` **không
+được** gọi tới module này.

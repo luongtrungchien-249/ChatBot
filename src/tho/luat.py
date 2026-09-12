@@ -510,8 +510,6 @@ def kiem_luc_bat(
             loi.extend(_kiem_bang_trac(tieng, i + 1, can_bang))
             # Cau bat: tieng 6 va tieng 8 deu thanh bang nhung phai KHAC nhau —
             # mot huyen mot ngang. Cung thanh thi doc len bi "det".
-            # Cau bat: tieng 6 va tieng 8 deu thanh bang nhung phai KHAC nhau —
-            # mot huyen mot ngang. Cung thanh thi doc len bi "det".
             if (
                 i % 2 == 1
                 and len(tieng) >= 8
