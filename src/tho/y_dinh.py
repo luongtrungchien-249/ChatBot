@@ -28,6 +28,55 @@ class YeuCauTho:
     #: Phan con lai cua cau — chu de nguoi dung muon. Rong thi model tu chon.
     chu_de: str
 
+    @property
+    def thong_diep(self) -> str:
+        """NOI DUNG CAN TRUYEN TAI, suy tu chu de. Rong = khong suy duoc.
+
+        Buoc 1 cua quy trinh (docs/plan-quy-trinh-10-buoc.md) tach yeu cau thanh BON
+        phan, trong do co "noi dung can truyen tai" — o day la phan thu tu do.
+
+        LA MOT THUOC TINH SUY RA, khong phai mot truong: no la ham cua `chu_de`, nen
+        luu rieng se tao ra hai nguon su that co the lech nhau. Va vi no suy ra, khong
+        cho goi nao phai sua.
+
+        SUY BANG BANG TU KHOA, khong bang model — cung ly do voi `nhan_dien`: them mot
+        luot goi model vao MOI yeu cau lam tho de doi lay mot dong mo ta la cai gia
+        khong dang. Khong khop thi tra RONG chu khong doan bua: mot thong diep sai con
+        te hon khong co thong diep, vi no se dan bai tho di nham huong.
+
+        Giai doan A CHI dung truong nay de HIEN THI trong vet. Dua no vao prompt la
+        viec cua giai doan B (§5 plan), va phai tra bang mot phep do A/B.
+        """
+        cd = self.chu_de.lower()
+        for tu_khoa, thong_diep in _THONG_DIEP:
+            if any(t in cd for t in tu_khoa):
+                return thong_diep
+        return ""
+
+
+#: Chu de -> noi dung can truyen tai. Doi khop THEO THU TU, cai dau tien khop thi lay.
+#:
+#: Thu tu co y nghia: "người con gái Việt Nam xưa" khop ca "việt nam" lan "con gái", va
+#: cai dung hon la "con gái" — nen no phai dung TRUOC. Moi lan them dong moi phai nghi
+#: xem no chen len cai gi.
+#:
+#: Bang nay CO CHU DICH nho: no khong co tham vong phu het moi chu de tieng Viet. Chu de
+#: khong khop thi tra rong, va vet se ghi "không suy được" — dung nhu su that.
+_THONG_DIEP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("cha", "mẹ", "phụ mẫu", "sinh thành"), "công ơn sinh thành, lòng hiếu thảo"),
+    (("thầy", "cô giáo", "trường", "dạy dỗ"), "ơn dạy dỗ, nhớ trường xưa"),
+    (("nguồn", "cội", "biết ơn", "uống nước", "tổ tiên", "ông bà"),
+     "lòng biết ơn, nhớ người đi trước"),
+    (("con gái", "thiếu nữ", "người đẹp", "giai nhân"), "vẻ đẹp và nết người"),
+    (("quê", "làng", "xa nhà", "cố hương"), "tình quê, nỗi nhớ nhà"),
+    (("bạn", "tri kỷ"), "tình bạn, nghĩa gắn bó"),
+    (("tình yêu", "người thương", "nhớ nhung"), "tình yêu và nỗi nhớ"),
+    (("đất nước", "non sông", "tổ quốc", "việt nam", "quê hương"), "tình yêu đất nước"),
+    (("xuân", "hạ", "thu", "đông", "mùa", "trăng", "hoa", "mưa", "nắng", "sen"),
+     "cảnh vật, và tâm trạng gửi trong cảnh"),
+    (("lao động", "công việc", "nghề"), "giá trị của lao động"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class KhongPhaiTho:
@@ -68,12 +117,34 @@ _DAN_CHU_DE = re.compile(
 )
 
 
+#: Cat NOT nhung dan con sot lai o DAU chu de.
+#:
+#: `_DAN_CHU_DE` chi cat MOT dan. Voi "về chủ đề uống nước nhớ nguồn" no cat "về" roi
+#: dung, cho ra chu de "chủ đề uống nước nhớ nguồn" — va de bai gui len model thanh
+#: "Chủ đề: chủ đề uống nước nhớ nguồn".
+#:
+#: Loi nay chay am tham nhieu ngay. No lo ra khi vet buoc 1 bat dau in chu de ra man
+#: hinh (xem tho/quy_trinh.py) — dung cai ma mot quy trinh quan sat duoc dung de lam.
+_DAU_THUA = re.compile(
+    r"^(?:về|chủ\s*đề|nói\s*về|tả|đề\s*tài|là)\b[\s:,-]*",
+    re.IGNORECASE,
+)
+
+
 def _chu_de(text: str, tu_vi_tri: int) -> str:
     """Chu de nam SAU ten the tho. Tim tu truoc do se vo phai cum dong tu sang tac."""
     khop = _DAN_CHU_DE.search(text, tu_vi_tri)
     if khop is None:
         return ""
-    return khop.group(1).strip().rstrip(".!?")
+    cd = khop.group(1).strip().rstrip(".!?")
+    # Lap, khong phai mot lan: "về chủ đề về mùa thu" co ba dan chong nhau. Co tran de
+    # mot mau benh hoan khong bien thanh vong lap vo tan.
+    for _ in range(3):
+        moi = _DAU_THUA.sub("", cd).strip()
+        if moi == cd:
+            break
+        cd = moi
+    return cd
 
 
 def nhan_dien(text: str) -> YDinh:

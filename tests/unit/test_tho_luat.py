@@ -773,3 +773,70 @@ class TestGoiYPhaiCoDau:
 
         for sai, dung in cum_nghi_be(bai):
             assert sai != dung, sai
+
+
+class TestTuDienDapBaoNhamChuKhongMoPhamViBat:
+    """Tu dien Wiktionary dung de DAP BAO NHAM, KHONG de mo rong pham vi BAT.
+
+    Khac biet do la tat ca, va no da duoc do. Ban dau nhoi ca hai nguon vao bang dieu
+    khien viec BAT:
+
+        bao nham tren Truyen Kieu   chat 0,00% -> 8,79%   hep 1,72% -> 13,95%
+
+    Te hon TAM LAN. Doc cac ca bao nham thi ro ngay:
+
+        "có hai" -> "có hại"      "nước đã" -> "nước đá"
+        "mới là" -> "mới lạ"      "sao bằng" -> "sao băng"
+
+    CA HAI VE DEU LA TU THAT, chi khac dau. Luat "khac moi dau => nghi be" chi dung khi
+    von tu NHO va nham vao TU LAY. Voi tu dien day du thi cap khac-dau-deu-co-that co o
+    khap noi, va luat mat hieu luc.
+
+    Sau khi tach vai tro: chat 0,00% · hep 1,60% · do chinh xac tren tho bot ~40% -> ~81%.
+    """
+
+    def test_pham_vi_BAT_chi_tu_danh_sach_TU_SOAN(self) -> None:
+        """`_THEO_DAU` dieu khien viec bat — no phai nho va duoc soan tay."""
+        from tho.tu_vung import _THEO_DAU, _TU_SOAN, TU_GHEP
+
+        assert len(_TU_SOAN) < 1000, "danh sách tự soạn phải NHỎ"
+        assert len(TU_GHEP) > 10_000, "danh sách dập báo nhầm phải LỚN"
+        assert len(_THEO_DAU) <= len(_TU_SOAN), "phạm vi bắt không được phình theo từ điển"
+
+    def test_tu_dien_DAP_duoc_bao_nham(self) -> None:
+        """Cum co trong tu dien thi khong duoc bao, du no khop mau nghi ngo."""
+        from tho.tu_vung import TU_GHEP, cum_nghi_be
+
+        # "vội vàng" co trong ca hai; "mải mê" co trong tu soan. Lay mot tu CHI co trong
+        # ban trich Wiktionary de chung minh ban trich that su dang dap bao nham.
+        chi_wikt = [t for t in ("bâng khuâng", "hờ hững", "lận đận") if t in TU_GHEP]
+        assert chi_wikt, "cần ít nhất một từ để kiểm"
+        for tu in chi_wikt:
+            bai = f"Chiều nay {tu} một mình" + chr(10) + "Nhớ về quê cũ bóng hình ngày xưa"
+            assert all(c != tu for c, _ in cum_nghi_be(bai)), tu
+
+    def test_van_bat_duoc_hai_ca_that(self) -> None:
+        """Dap bao nham KHONG duoc lam mat kha nang bat."""
+        from tho.tu_vung import cum_nghi_be
+
+        bai = (
+            "Nét vàng như ánh nguyệt đèn rực rao" + chr(10)
+            + "Tỏa hương thanh khiết ngọt ngao nụ cười"
+        )
+        cum = {c for c, _ in cum_nghi_be(bai)}
+
+        assert "rực rao" in cum
+        assert "ngọt ngao" in cum
+
+    def test_tep_dan_xuat_ghi_ro_NGUON_va_GIAY_PHEP(self) -> None:
+        """CC BY-SA doi GHI NGUON. Nghia vu do phai nam ngay trong tep, khong chi o README.
+
+        Tep duoc SINH RA, nen neu bo sinh quen ghi thi khong ai thay — test nay thay.
+        """
+        from tho import tu_ghep_wiktionary
+
+        doc = tu_ghep_wiktionary.__doc__ or ""
+
+        assert "Wiktionary" in doc
+        assert "CC BY-SA" in doc
+        assert "kaikki.org" in doc

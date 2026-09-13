@@ -26,6 +26,8 @@ tu lay doi, vi tieng thu hai cua tu lay la cho de bien dang nhat va cung la cho 
 vao vi tri van. Mot cum khong co trong day KHONG co nghia la no sai.
 """
 
+from .tu_ghep_wiktionary import TU_GHEP_WIKT
+
 #: Danh sach cum KHONG CAN BAO — phan lon la tu lay, nhung co ca vai cum chi la
 #: hai tu ke nhau vo toi (`bao là`, `trăng trong`). Day khong phai tu dien; no la
 #: danh sach nhung cho bo do KHONG duoc bao.
@@ -190,7 +192,31 @@ def _doc() -> frozenset[str]:
     return frozenset(ra)
 
 
-TU_GHEP: frozenset[str] = _doc()
+#: Von tu TU SOAN, giu rieng de con doc va sua bang mat.
+_TU_SOAN: frozenset[str] = _doc()
+
+#: Von tu DAY DU = tu soan + ban trich Wiktionary (18.157 tu, CC BY-SA 4.0).
+#:
+#: DUNG DE DAP BAO NHAM, KHONG DE MO RONG PHAM VI BAT. Khac biet do la tat ca, va no da
+#: duoc do:
+#:
+#: Ban dau toi nhoi ca hai nguon vao `_THEO_DAU` (bang dieu khien viec BAT). Ket qua:
+#:
+#:     bao nham tren Truyen Kieu    chat 0,00% -> 8,79%    hep 1,72% -> 13,95%
+#:
+#: Te hon TAM LAN. Doc cac ca bao nham thi ro ngay:
+#:
+#:     "có hai"  -> "có hại"       "nước đã" -> "nước đá"
+#:     "mới là"  -> "mới lạ"       "sao bằng" -> "sao băng"
+#:
+#: CA HAI VE DEU LA TU THAT, chi khac dau. Luat "khac moi dau => nghi be" chi dung khi
+#: von tu NHO va nham vao TU LAY: luc do "ngọt ngào"/"ngọt ngao" gan nhu khong the nham.
+#: Voi tu dien day du thi cap khac-dau-deu-co-that co o khap noi, va luat mat hieu luc.
+#:
+#: Nen: `_THEO_DAU` (dieu khien viec BAT) chi xay tu `_TU_SOAN`; con `_TU_CHUAN` (danh
+#: sach "day la tu that, dung bao") dung CA HAI. Tu dien lam viec no lam tot — xac nhan
+#: mot cum co that — chu khong lam viec no lam te.
+TU_GHEP: frozenset[str] = _TU_SOAN | TU_GHEP_WIKT
 
 #: Cung danh sach tren, o DANG CHUAN — tra cuu dung bang nay chu khong dung `TU_GHEP`,
 #: de "hiền hoà" va "hiền hòa" cung khop. Xem `chuan_hoa`.
@@ -198,12 +224,12 @@ _TU_CHUAN: frozenset[str] = frozenset(chuan_hoa(t) for t in TU_GHEP)
 
 #: Tieng DAU cua cac tu tren. Mot cum co tieng dau nam trong day nhung khong khop tu
 #: nao la cum DANG NGO — xem `cum_kha_nghi(chat=False)`.
-TIENG_DAU: frozenset[str] = frozenset(t.split()[0] for t in TU_GHEP)
+TIENG_DAU: frozenset[str] = frozenset(t.split()[0] for t in _TU_SOAN)
 
 #: Tieng SAU, theo tieng dau. Dung cho che do CHAT: chi bao khi tieng sau chi khac
 #: mot tu da biet o DAU THANH.
 _THEO_DAU: dict[str, frozenset[str]] = {}
-for _t in TU_GHEP:
+for _t in _TU_SOAN:
     _a, _b = _t.split()
     # KHOA o dang CHUAN (de "hoà"/"hòa" khop nhau), nhung GIA TRI giu NGUYEN VAN.
     #

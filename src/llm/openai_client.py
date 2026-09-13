@@ -175,7 +175,14 @@ class OpenAiLlm:
         route: ReplyRoute = "reply",
     ) -> LlmResult:
         return await self._measured(
-            "reply",
+            # PHAI truyen `route`, khong duoc ghi cung "reply".
+            #
+            # Ghi cung -> moi luot route=`poem` bi ke toan nham: ghi model cua
+            # route `reply` va tinh theo GIA cua route `reply`. Do 12/09/2026 tren
+            # 3.920 luot lam tho that: so ghi $1,15 trong khi dung ra $0,41 — thua
+            # 2,8 lan. Hau qua that: chan ngan sach ban som gap 2,8 lan, va
+            # `usage_log` khong phan biet duoc model nao lam gi.
+            route,
             ctx,
             lambda: self._do_reply(system, messages, max_tokens, effort, ctx, tools, route),
         )

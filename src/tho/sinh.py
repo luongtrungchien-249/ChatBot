@@ -18,10 +18,12 @@ BA RANG BUOC, moi cai chan mot kieu hong:
 
 import asyncio
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from .bang_van import CHU_THEO_VAN
 from .cham_diem import cham_tat_dinh
 from .chon_van import (
     HUONG_DAN as HUONG_DAN_CHON_VAN,
@@ -32,6 +34,9 @@ from .chon_van import (
     yeu_cau_chon_van,
     yeu_cau_viet_bai,
 )
+from .lap_y import doc_mach_y, yeu_cau_lap_y
+from .lap_y import huong_dan as huong_dan_lap_y
+from .lap_y import yeu_cau_viet_bai as yeu_cau_viet_bai_co_mach
 from .luat import Loi, kiem_luc_bat, kiem_that_ngon_tu_tuyet
 from .prompt import (
     _MAU_LUC_BAT,
@@ -44,8 +49,40 @@ from .prompt import (
     yeu_cau,
     yeu_cau_chon,
 )
+from .quy_trinh import TEN_TNTT, SoVet, VetBuoc, VetCon, vet_kiem_luat
 from .tu_vung import cum_kha_nghi, cum_nghi_be
-from .y_dinh import TheTho
+from .y_dinh import TheTho, YeuCauTho
+
+#: BUOC 2: lap y thanh mot LUOT GOI RIENG truoc khi viet cau.
+#:
+#: DA THU VA DA TAT, 13/09/2026. A/B n=40 cap GHEP THEO CHU DE, HAI luot doc lap,
+#: cham ca hai thang (45 tat dinh + 40 nguoi cham). Nguoi cham chay 160/160 khong hong.
+#:
+#:                     luot 1            luot 2
+#:     ngon ngu      +0,33 +/- 0,72   -0,90 +/- 0,90    <- DAO DAU
+#:     sang tao      +0,03 +/- 0,33   -0,47 +/- 0,33    <- DAO DAU
+#:     y nghia       +0,35 +/- 0,35   -0,28 +/- 0,32    <- DAO DAU
+#:     TONG /40      +1,38 +/- 1,81   -2,10 +/- 2,13
+#:     tat dinh /45  -0,56 +/- 2,86   -0,22 +/- 2,31
+#:     do tre        +1.029 ms        +949 ms
+#:     luot goi      4,15 -> 5,25     4,12 -> 5,15
+#:
+#: HAI LUOT NOI NGUOC NHAU. Luot 1 bao lap y lam ngon ngu TOT len, luot 2 bao no lam
+#: ngon ngu TE di — cung cau hinh, cung 40 chu de, chi khac lan chay.
+#:
+#: DAY LA LY DO PHAI CHAY HAI LUOT. Chi lay luot 1 thi ket luan se la "+1,38 tong,
+#: y nghia +0,35 +/- 0,35 — bat len di", va ta se ship mot thu khong co that. Du an nay
+#: da mot lan bao "61,0 -> 69,1 trong mot ngay" tren mot luot chay duy nhat, roi phai
+#: rut lai.
+#:
+#: KET LUAN: khong co hieu ung do duoc, ma gia thi co that — p50 1.282 -> 2.172 ms
+#: (+70%) va +1,1 luot goi model moi bai, tren mot tinh nang co muc tieu GIAM do tre.
+#: Giu TAT.
+#:
+#: Giu code lai (tho/lap_y.py) vi gia thuyet khong sai, chi la khong do duoc gi o
+#: gpt-4o-mini. Muon thu lai voi model khac thi bat `lap_y=True` va do lai TU DAU —
+#: con so tren la cua gpt-4o-mini.
+LAP_Y = False
 
 #: Chon CHU VAN truoc khi viet cau — DA THU VA DA TAT.
 #:
@@ -235,6 +272,12 @@ class KetQua:
     so_lan_goi: int
     #: Loi bang-trac — ghi lai de theo doi, KHONG chan. Xem `EP_BANG_TRAC`.
     loi_bang_trac: tuple[Loi, ...] = ()
+    #: VET cua 10 buoc lam tho. Xem tho/quy_trinh.py.
+    #:
+    #: Mac dinh RONG va la truong cuoi cung: them no khong bat cho goi nao phai sua, va
+    #: `tra_loi()` khong dung toi no — vet la thu de NGUOI PHAT TRIEN doc, khong phai
+    #: thu gui cho nguoi dung.
+    vet: tuple[VetBuoc, ...] = ()
 
 
 #: Co EP luat bang-trac khong.
@@ -467,6 +510,20 @@ def _sach(bai: str) -> str:
     return "\n".join(d.strip() for d in bai.strip().split("\n") if d.strip())
 
 
+async def _lap_y(chu_de: str, goi_model: GoiModel) -> tuple[str | None, int]:
+    """Mot luot goi: chu de -> mach {SO_Y} y. None = khong doc duoc, BO QUA buoc nay.
+
+    Chi thu MOT lan. `_chon_van_truoc` thu hai lan vi bo van hong lam hong ca bai; o
+    day mach y hong thi ta chi mat mot goi y, va de bai cu van dung duoc. Thu lai chi
+    de cong them do tre vao dung cai tinh nang co muc tieu GIAM do tre.
+    """
+    try:
+        raw = await goi_model(huong_dan_lap_y(), [yeu_cau_lap_y(chu_de)])
+    except Exception:
+        return None, 0
+    return doc_mach_y(raw), 1
+
+
 async def _chon_van_truoc(chu_de: str, goi_model: GoiModel) -> tuple[str | None, int]:
     """Giai doan 1. Tra (yeu cau cho giai doan 2, so lan goi model).
 
@@ -499,6 +556,7 @@ async def sinh_tho(
     chon_bang_nguoi_cham: bool = CHON_BANG_NGUOI_CHAM,
     cham_model: GoiModel | None = None,
     chon_van_truoc: bool = CHON_VAN_TRUOC,
+    lap_y: bool = LAP_Y,
 ) -> KetQua:
     """Sinh mot bai tho dung luat, hoac bai tot nhat lam duoc kem loi con lai.
 
@@ -511,50 +569,145 @@ async def sinh_tho(
       2. ban do con sai KHUNG thi sua, co VE RA cho sai;
       3. van sai khung thi CAT ve nhung cap 6-8 dung.
     """
+    # Ten de rieng cho that ngon tu tuyet: TEN_BUOC viet theo luc bat, in nguyen xi
+    # len mot bai tu tuyet la vet noi sai.
+    so = SoVet(ten_rieng=dict(TEN_TNTT) if the_tho != "luc_bat" else {})
+
+    # ================= BUOC 1: xac dinh yeu cau =================
+    with so.do("yeu_cau", "luat") as g:
+        yc = YeuCauTho(the_tho=the_tho, chu_de=chu_de)
+        ten_the = "lục bát" if the_tho == "luc_bat" else "thất ngôn tứ tuyệt"
+        g.tom_tat = (
+            f"thể {ten_the} · chủ đề {chu_de or '(model tự chọn)'} · "
+            f"thông điệp {yc.thong_diep or '(không suy được)'}"
+        )
+
     sys_prompt = system_prompt(the_tho)
     dau_bai = yeu_cau(chu_de)
     so_lan_goi = 0
 
+    # ================= BUOC 2: lap y / mach cam xuc =================
+    #
+    # Sau co `LAP_Y`, mac dinh TAT. Xem tho/lap_y.py de biet vi sao no van dang tat.
+    mach: str | None = None
+    if lap_y:
+        with so.do("lap_y", "model") as g:
+            mach, them = await _lap_y(chu_de, goi_model)
+            so_lan_goi += them
+            g.so_lan_goi = them
+            if mach is not None:
+                dau_bai = yeu_cau_viet_bai_co_mach(mach, chu_de)
+            g.tom_tat = mach or "không đọc được mạch ý — BỎ QUA, viết một mạch như cũ"
+    else:
+        so.bo_qua(
+            "lap_y",
+            "model",
+            "đang TẮT (LAP_Y=False) — mạch ý vẫn nằm trong prompt, chưa là lượt gọi riêng",
+        )
+
+    # ================= BUOC 3: chon hinh anh & tu khoa =================
+    #
     # HAI GIAI DOAN, chi cho luc bat. Xem docstring cua tho/chon_van.py: bao model
     # "dung ep van" khong an vi van de nam o THU TU SINH, khong o chi dan.
     #
     # That ngon tu tuyet chua lam vi cau truc van cua no khac (cuoi cau 1-2-4) va chua
     # do duoc gi tren the do — them mot duong chua kiem chung la them mot cho hong.
-    if the_tho == "luc_bat" and chon_van_truoc:
-        yeu_cau_moi, them = await _chon_van_truoc(chu_de, goi_model)
-        so_lan_goi += them
-        if yeu_cau_moi is not None:
-            dau_bai = yeu_cau_moi
+    hai_giai_doan = the_tho == "luc_bat" and chon_van_truoc
+    with so.do("hinh_anh", "model" if hai_giai_doan else "luat") as g:
+        if hai_giai_doan:
+            yeu_cau_moi, them = await _chon_van_truoc(chu_de, goi_model)
+            so_lan_goi += them
+            g.so_lan_goi = them
+            if yeu_cau_moi is not None:
+                # `yeu_cau_viet_bai` cua chon_van.py dung lai de bai TU DAU tu `chu_de`,
+                # nen no XOA mat mach y cua buoc 2. Hai co nay deu dang tat, nhung ngay
+                # ai do bat ca hai thi buoc 2 se ton mot luot goi model roi bi nuot im
+                # lang — kieu hong te nhat: ton tien, khong bao loi, khong ai thay.
+                dau_bai = yeu_cau_moi
+                if mach is not None:
+                    dau_bai = f"{dau_bai}\n\nMạch cảm xúc gợi ý: {mach}"
+            g.tom_tat = "chọn CHỮ VẦN trước khi viết câu" + (
+                "" if yeu_cau_moi is not None else " — không đọc được bộ vần, dùng đề bài gốc"
+            )
+        elif the_tho == "luc_bat":
+            # Nua CO: bang van goi y trong system_prompt. Nua CHUA CO: hinh anh.
+            g.tom_tat = (
+                f"gợi ý VẦN từ bảng {len(CHU_THEO_VAN)} nhóm (trong system prompt); "
+                "phần HÌNH ẢNH chưa thi công"
+            )
+        else:
+            g.tom_tat = "thất ngôn tứ tuyệt chưa có bảng vần"
 
-    # --- 1. Sinh song song ---
-    ban = await asyncio.gather(
-        *(goi_model(sys_prompt, [dau_bai]) for _ in range(max(1, so_ban))),
-        return_exceptions=True,
-    )
-    ung_vien: list[tuple[str, list[Loi]]] = []
-    for b in ban:
-        so_lan_goi += 1
-        if isinstance(b, BaseException):
-            continue
-        bai = _sach(b)
-        if bai:
-            ung_vien.append((bai, _kiem(the_tho, bai)))
+    # ================= BUOC 4-6: sinh cau · gieo van · noi mach =================
+    #
+    # Ba buoc nay chay TRONG CUNG MOT luot goi model. Vet ghi ra ca ba de so do khong
+    # thieu o nao, nhung chi buoc 4 mang so gio va so luot goi — neu khong thi tong o
+    # cuoi bang se dem mot luot goi ba lan.
+    #
+    # Tach chung thanh ba luot rieng la viec KHONG lam, co chu dinh: sinh tung cau mot
+    # thi model mat ngu canh ca bai, va do dung la co che da lam `CHON_VAN_TRUOC` hong
+    # (69,7 -> 57,1). Xem §6 cua docs/plan-quy-trinh-10-buoc.md.
+    with so.do("sinh_cau", "model") as g:
+        ban = await asyncio.gather(
+            *(goi_model(sys_prompt, [dau_bai]) for _ in range(max(1, so_ban))),
+            return_exceptions=True,
+        )
+        ung_vien: list[tuple[str, list[Loi]]] = []
+        for b in ban:
+            so_lan_goi += 1
+            g.so_lan_goi += 1
+            if isinstance(b, BaseException):
+                continue
+            bai = _sach(b)
+            if bai:
+                ung_vien.append((bai, _kiem(the_tho, bai)))
+        g.tom_tat = f"{len(ung_vien)}/{max(1, so_ban)} bản sinh song song dùng được"
 
-    if not ung_vien:
-        # Moi ban deu hong. Nem ra de cho goi biet — tra ve mot KetQua rong se lam
-        # su co ha tang trong y het mot bai tho te.
-        loi_dau = next((b for b in ban if isinstance(b, BaseException)), None)
-        raise loi_dau or RuntimeError("khong sinh duoc ban nao")
+        if not ung_vien:
+            # Moi ban deu hong. Nem ra de cho goi biet — tra ve mot KetQua rong se lam
+            # su co ha tang trong y het mot bai tho te.
+            loi_dau = next((b for b in ban if isinstance(b, BaseException)), None)
+            raise loi_dau or RuntimeError("khong sinh duoc ban nao")
+
+    so.ghi_kem("gieo_van", "model", "gieo vần cùng lúc với việc viết câu, trong lượt gọi ở bước 4")
+    so.ghi_kem("noi_mach", "model", "nối mạch cùng lúc với việc viết câu, trong lượt gọi ở bước 4")
 
     # Xep hang theo KHUNG truoc. Truoc 11/09/2026 cho nay dem gop moi loai loi lam
     # mot, va hau qua do duoc tren 6 bai chay that: 0/6 bai dung khung, trong khi 65%
     # so ban sinh ra von da dung khung. Ta co san ban dat va da tu chon ban hong.
     tot_nhat, loi_tot_nhat = min(ung_vien, key=lambda x: _xep_hang(x[1], x[0]))
 
+    # ================= BUOC 7: kiem tra luat =================
+    #
+    # Kiem da chay roi — no chay tren TUNG ban ngay trong buoc 4, va chinh no quyet
+    # dinh ban nao duoc chon. O day chi SUY RA bon muc ①②③④ tu ket qua do, khong goi
+    # lai bo kiem: goi lai la do mot thu khac voi cai da dung de chon.
+    #
+    # Vet nay mo ta BAN NHAP — dung nhu so do cua nguoi dung ("sau khi tao ban nhap,
+    # can kiem tra"). Trang thai CUOI CUNG nam o vet buoc 10.
+    with so.do("kiem_luat", "luat") as g:
+        g.chi_tiet = vet_kiem_luat(
+            tot_nhat, loi_tot_nhat, _loi_bang_trac(the_tho, tot_nhat), the_tho
+        )
+        g.tom_tat = (
+            f"bản nháp tốt nhất trong {len(ung_vien)} bản · còn {len(loi_tot_nhat)} lỗi chặn"
+        )
+
     # KHUNG la bo loc CUNG, dat truoc moi phep xep hang khac: mot ban khong phai luc
     # bat thi hay den may cung khong dung duoc.
     sach_khung = [x for x in ung_vien if _xep_hang(x[1])[1] == 0]
 
+    # ================= BUOC 8: kiem noi dung & cam xuc =================
+    #
+    # THI CONG DUOC MOT PHAN, va vet phai noi ro phan nao:
+    #   co   — chu bi BE cho du van ("ngọt ngào" -> "ngọt ngao"): bo do tat dinh, chan
+    #   co   — chep bai mau trong prompt: tat dinh
+    #   CHUA — mach noi dung (cau 1 noi cha, cau 3 dot nhien noi bien)
+    #
+    # Muc thu ba la thu nguoi dung neu dich danh. No nam o §5 (B3) cua plan, va se thu
+    # bang LUAT truoc chu khong bang nguoi cham: nguoi cham da hong ba lan (+23 giay,
+    # 21/30 luot timeout).
+    #
     # --- 1a. LOC CUNG: bo cac ban co CHU BI BE ---
     #
     # "chi duoc chon lua cac tu co y nghia" — nen ban co "ngọt ngao" bi loai han khoi
@@ -572,11 +725,46 @@ async def sinh_tho(
     #           tuong duong  -> chiu duoc bo do nhieu
     #
     # Nen bo do rong nam o `_xep_hang` (chon), bo do chat nam o day (chan).
-    sach_be = [x for x in ung_vien if not cum_kha_nghi(x[0])]
-    if sach_be:
-        ung_vien = sach_be
-        sach_khung = [x for x in sach_khung if not cum_kha_nghi(x[0])] or sach_khung
-        tot_nhat, loi_tot_nhat = min(ung_vien, key=lambda x: _xep_hang(x[1], x[0]))
+    with so.do("kiem_noi_dung", "luat") as g:
+        be_truoc = [x for x in ung_vien if cum_kha_nghi(x[0])]
+        sach_be = [x for x in ung_vien if not cum_kha_nghi(x[0])]
+        if sach_be:
+            ung_vien = sach_be
+            sach_khung = [x for x in sach_khung if not cum_kha_nghi(x[0])] or sach_khung
+            tot_nhat, loi_tot_nhat = min(ung_vien, key=lambda x: _xep_hang(x[1], x[0]))
+        chep = so_cau_chep(tot_nhat)
+        con_be = cum_kha_nghi(tot_nhat)
+        g.chi_tiet = (
+            VetCon(
+                ten="chữ bị bẻ cho đủ vần",
+                dat=not con_be,
+                tom_tat=(
+                    f"loại {len(be_truoc)}/{len(be_truoc) + len(sach_be)} bản có chữ bị bẻ"
+                    if not con_be
+                    else "MỌI bản đều bẻ chữ: "
+                    + "; ".join(f"'{a}' (chắc là '{b}')" for a, b in con_be)
+                ),
+            ),
+            VetCon(
+                ten="chép bài mẫu",
+                dat=chep == 0,
+                tom_tat="không chép câu nào" if chep == 0 else f"chép {chep} câu của bài mẫu",
+            ),
+            VetCon(
+                ten="mạch nội dung",
+                # None, KHONG phai True — va gio co mot ly do CU THE chu khong con
+                # la "chua lam". Xem tho/mach_y.py: bo do bang luat da duoc dung va do,
+                # bao nham 19,50% tren Truyen Kieu, trong khi nguong de duoc tham gia
+                # xep hang la 1,60%. Nen no khong duoc noi vao dau, va muc nay van la
+                # KHONG KIEM DUOC.
+                dat=None,
+                tom_tat=(
+                    "không kiểm được — bộ dò bằng luật đã thử và trượt "
+                    "(báo nhầm 19,50% trên Truyện Kiều, ngưỡng 1,60%)"
+                ),
+            ),
+        )
+        g.tom_tat = f"{len(ung_vien)} bản qua được bộ lọc cứng"
 
     # --- 1b. Xep hang bang NGUOI CHAM ---
     #
@@ -597,6 +785,23 @@ async def sinh_tho(
             )[0]
         # `diem is None` -> nguoi cham hong. GIU nguyen ban da chon theo luat: mot su
         # co ha tang khong duoc bien thanh mot bai tho te.
+        #
+        # Vong nay THUOC buoc 8 (chon theo noi dung) nhung nam sau bo loc cung, ngoai
+        # khoi `so.do`. Cong luot goi vao dung vet do de tong trong vet khong dem thieu.
+        so.them_goi("kiem_noi_dung", them, f"người chấm xếp hạng {len(sach_khung)} bản")
+
+    # ================= BUOC 9: chinh sua cau chu =================
+    #
+    # Ba tang, deu da co tu truoc: sua KHUNG (2), sua CHU BI BE (2b), va luoi cuoi CAT
+    # ve nhung cap dung (3). Tang 3 la tat dinh, hai tang dau goi model.
+    #
+    # Vet ghi lai bai TRUOC khi sua de so sanh duoc — day la buoc ma so do cua nguoi
+    # dung goi la "rat quan trong", va cung la buoc co lich su do te nhat trong du an:
+    # `SUA_LOI_VAN` tat vi 6/10 lan sua lam bai TE HON.
+    truoc_sua = tot_nhat
+    loi_truoc_sua = list(loi_tot_nhat)
+    goi_truoc_sua = so_lan_goi
+    t_sua = time.monotonic()
 
     # --- 2. Sua ban tot nhat ---
     for lan in range(so_lan_sua + so_lan_sua_khung):
@@ -655,11 +860,42 @@ async def sinh_tho(
             if _xep_hang(loi_cat)[1] == 0:
                 tot_nhat, loi_tot_nhat = cat, loi_cat
 
+    # Dong vet buoc 9. Ghi CA khi khong sua gi — "khong can sua" la mot ket qua, va
+    # giau no di se lam nguoi doc tuong buoc 9 chua duoc thi cong.
+    doi = tot_nhat != truoc_sua
+    so.ghi(
+        "chinh_sua",
+        "model",
+        ms=(time.monotonic() - t_sua) * 1000,
+        so_lan_goi=so_lan_goi - goi_truoc_sua,
+        tom_tat=(
+            f"đổi bản: còn {len(loi_tot_nhat)} lỗi chặn (trước khi sửa {len(loi_truoc_sua)})"
+            if doi
+            else "không sửa gì — bản nháp đã tốt nhất, hoặc mọi bản sửa đều tệ hơn"
+        ),
+    )
+
+    # ================= BUOC 10: xuat ban =================
+    #
+    # Vet nay mo ta bai CUOI CUNG, doi lai voi vet buoc 7 (mo ta ban nhap).
+    loi_bt = _loi_bang_trac(the_tho, tot_nhat)
+    with so.do("xuat_ban", "luat") as g:
+        g.chi_tiet = vet_kiem_luat(tot_nhat, loi_tot_nhat, loi_bt, the_tho)
+        so_cau = len([d for d in tot_nhat.split(chr(10)) if d.strip()])
+        # Noi ro co kem cau bao loi khong: `tra_loi()` gan them mot cau khi con loi, va
+        # do la thu nguoi dung nhin thay. Xem luat "khong bao gio im lang" o dau tep.
+        g.tom_tat = (
+            f"{so_cau} câu · "
+            + ("sạch luật, trả thẳng bài thơ" if not loi_tot_nhat else
+               f"còn {len(loi_tot_nhat)} lỗi — `tra_loi()` sẽ nói thẳng lỗi còn lại")
+        )
+
     return KetQua(
         bai_tho=tot_nhat,
         con_loi=tuple(loi_tot_nhat),
         so_lan_goi=so_lan_goi,
-        loi_bang_trac=_loi_bang_trac(the_tho, tot_nhat),
+        loi_bang_trac=loi_bt,
+        vet=so.xong(),
     )
 
 

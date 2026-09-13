@@ -127,3 +127,30 @@ docker compose -f ops/docker-compose.yml --profile monitoring up -d
 
 `cli stats` tra loi ba cau: tien di dau, route nao cham, va prompt caching co dang
 an khong. Ti le cache tut ve 0 nghia la tien to on dinh cua prompt da vo.
+
+## Ghi cong du lieu ben thu ba
+
+**Tu ghep tieng Viet** (`src/tho/tu_ghep_wiktionary.py` — 18.157 tu)
+
+Trich tu **Wiktionary** tieng Anh bang cong cu `wiktextract`, phan phoi qua
+[kaikki.org](https://kaikki.org/dictionary/Vietnamese/). Noi dung Wiktionary o duoi
+**CC BY-SA 4.0** (va GFDL).
+
+Tep trong repo la mot **ban trich** cua du lieu do — tuc mot tac pham phai sinh — nen
+no mang theo cung giay phep. Dung de bat cum chu bi be cho van khi lam tho
+(«ngọt ngào» -> «ngọt ngao»).
+
+Sinh lai:
+
+```bash
+curl -L -o /tmp/vi.jsonl \
+  https://kaikki.org/dictionary/Vietnamese/kaikki.org-dictionary-Vietnamese.jsonl
+uv run python ops/dung_tu_ghep.py /tmp/vi.jsonl
+```
+
+Tep 79 MB goc **khong** duoc commit: ta chi can danh sach tu, va ban trich nho hon vai
+tram lan nen con doc va review duoc bang mat.
+
+**Tho luc bat lam vi du** (`src/tho/bang_van.py`, `evals/corpus/tho/`)
+
+Truyen Kieu — Nguyen Du, va mot so cau ca dao. Het han bao ho.
