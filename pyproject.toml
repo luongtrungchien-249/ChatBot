@@ -85,11 +85,21 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 disallow_any_explicit = false   # can Any o ranh gioi JSON cua API ben ngoai
-files = ["src", "tests", "ops", "evals"]
-mypy_path = "src"
+files = ["src", "tests", "ops", "evals", "rlvr"]
+mypy_path = "src:rlvr"
 
 [[tool.mypy.overrides]]
 module = ["arq.*", "asyncpg.*", "docx.*"]
+ignore_missing_imports = true
+
+# Thu vien HUAN LUYEN — nam o nhom `rlvr`, khong cai trong CI.
+#
+# `rlvr/` VAN duoc mypy kiem (no nam trong `files`): phan logic o do — ham thuong,
+# cot GIU, doc du lieu — phai dung kieu nhu moi phan khac. Chi rieng BIEN GIOI voi
+# torch/trl la duoc bo qua, vi cai chung vao CI de kiem kieu la tai hang GB cho mot
+# thu ma CI khong bao gio chay.
+[[tool.mypy.overrides]]
+module = ["torch.*", "trl.*", "peft.*", "datasets.*", "transformers.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

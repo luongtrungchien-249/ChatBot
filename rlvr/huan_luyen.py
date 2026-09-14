@@ -69,11 +69,26 @@ def ham_thuong(completions: list[str], **kwargs: object) -> list[float]:
     `the_tho` di theo tung dong du lieu chu khong ghi cung: mot ngay nao do train tren
     ca bat cu thi cham bang thuoc luc bat se cho diem gan nhu bang 0 cho MOI ban — va
     do la kieu hong lam ca lan chay tro nen vo nghia ma khong bao gi.
+
+    NHAN DANG SACH cho tung ban chu khong mot chuoi chung: TRL truyen cac cot cua tap
+    du lieu vao day duoi dang LIST song song voi `completions`. Nhan nham mot chuoi roi
+    nhan ban ra se cho ket qua dung O TRUONG HOP tap chi co mot the tho — tuc no se
+    chay im lang cho toi dung ngay ta tron hai the.
     """
-    the_tho = kwargs.get("the_tho") or ["luc_bat"] * len(completions)
-    if isinstance(the_tho, str):
-        the_tho = [the_tho] * len(completions)
-    return [thuong(c, t) for c, t in zip(completions, the_tho, strict=True)]  # type: ignore[arg-type]
+    raw = kwargs.get("the_tho")
+    if isinstance(raw, str):
+        the_tho = [raw] * len(completions)
+    elif isinstance(raw, list):
+        the_tho = [str(x) for x in raw]
+    else:
+        the_tho = ["luc_bat"] * len(completions)
+
+    if len(the_tho) != len(completions):
+        raise ValueError(
+            f"the_tho co {len(the_tho)} phan tu nhung co {len(completions)} ban sinh — "
+            "cham nham the tho se cho diem gan 0 cho MOI ban ma khong bao gi"
+        )
+    return [thuong(c, t) for c, t in zip(completions, the_tho, strict=True)]
 
 
 def main() -> int:
