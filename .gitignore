@@ -26,3 +26,8 @@ evals/corpus/*
 # Không được đẩy data lên git
 lakehouse/datalake
 lakehouse/datawarehouse
+# Ket qua huan luyen RLVR — trong so LoRA + checkpoint, hang tram MB.
+# Bo CHU DE (rlvr/du_lieu/) thi VAN commit: no sinh tu ops/sinh_chu_de.py voi hat giong
+# co dinh, va phep nghiem thu phu thuoc vao dung tap test do — mat no la mat kha nang
+# so sanh voi cac lan chay truoc.
+rlvr/ket_qua/
