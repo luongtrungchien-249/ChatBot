@@ -645,10 +645,36 @@ def kiem_that_ngon_tu_tuyet(bai: str, *, kiem_bang_trac: bool = True) -> list[Lo
         loi.extend(theo_bang if len(theo_bang) <= len(theo_trac) else theo_trac)
 
     # --- Van cuoi cau 1, 2, 4 ---
+    #
+    # NEO VAO CAU DA SO, khong neo co dinh vao cau 2.
+    #
+    # Ban truoc viet `if not van_nhau(c2, c4): bao loi o CAU 4`. Tuc lay cau 2 lam moc
+    # va do loi cho cau 4 — du cau 2 moi la cau lech. Phep hieu chuan 14/09 bat duoc
+    # tren „Thu vinh" (bon cau dau):
+    #
+    #     cao (c1) · hiu (c2) · phu (c3) · vào (c4)
+    #
+    # c1 va c4 hiep nhau o van "ao"; c2 moi la cai lech. Ban cu bao loi o CAU 4.
+    #
+    # Day dung la loi da sua trong bat_cu.py cung ngay — hai bo kiem viet cach nhau
+    # nhieu thang nhung mac cung mot loi, vi cung mot thoi quen: lay mot cau CO DINH
+    # lam chuan thay vi de chinh bai quyet dinh van cua no.
     c1, c2, c4 = cau[0][-1], cau[1][-1], cau[3][-1]
     if not van_nhau(c2, c4):
+        # c1 dung ra lam trong tai: no hiep voi ben nao thi ben kia la ben lech.
+        if van_nhau(c1, c4):
+            lech, moc, so = c2, c4, 2
+        else:
+            # Ke ca khi ca ba deu lech nhau: bao cau 4 nhu cu, vi luc do bai hong van
+            # roi va cho nao cung dung.
+            lech, moc, so = c4, c2, 4
         loi.append(
-            Loi(cau=4, loai="van", mo_ta=f"'{c4}' không hiệp vần '{c2}' (cuối câu 2 và câu 4)")
+            Loi(
+                cau=so,
+                loai="van",
+                mo_ta=f"'{lech}' không hiệp vần '{moc}' (vần chính của bài)",
+                vi_tri=7,
+            )
         )
     if not van_nhau(c1, c2) and not van_nhau(c1, c4):
         loi.append(

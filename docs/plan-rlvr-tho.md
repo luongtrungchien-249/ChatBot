@@ -48,7 +48,7 @@ khác. Những cần gạt rẻ đã thử hết — cái còn lại là **đổ
 | tiếng 6 ≠ tiếng 8 câu bát | `kiem_luc_bat` | 0,0 % |
 | **vần** | `lay_van` + `van_nhau` | **17,0 %** ⚠️ |
 | nhịp | `kiem_nhip` | *chỉ kiểm được dấu phẩy* |
-| thất ngôn **tứ tuyệt** | `kiem_that_ngon_tu_tuyet` | chưa hiệu chuẩn |
+| thất ngôn **tứ tuyệt** | `kiem_that_ngon_tu_tuyet` | **0,7 %** (đo 14/09, xem §9.4) |
 | chấm điểm liên tục | `cham_tat_dinh` → 45 điểm | — |
 
 `cham_tat_dinh` **đã cho điểm theo tỉ lệ đạt/tổng**, không phải nhị phân. Đó đúng là
@@ -307,3 +307,47 @@ là kiểu sai nguy hiểm: người đọc sau tin nó thay vì đo lại. Đã
 - Cột **GIỮ** của §6.3 mới đo được phần tất định (chép, cụm bị bẻ). Phần người chấm
   (`evals/metrics/tho_hay.py`) chưa nối vào — mà đó mới là phần bắt được "đúng luật
   nhưng vô hồn".
+
+### 9.4 Hiệu chuẩn thất ngôn tứ tuyệt — lần đầu tiên
+
+`kiem_that_ngon_tu_tuyet` đã được dùng trong `phan_thuong` làm **hàm thưởng** mà chưa
+ai từng đo nó. Bảng §2.1 ghi thẳng *"chưa hiệu chuẩn"* ở dòng đó.
+
+`ops/hieu_chuan_that_ngon.py` + `evals/corpus/tho/tu-tuyet.txt`:
+
+```
+THẤT NGÔN TỨ TUYỆT   7/8 bài sạch · 1/152 ràng buộc = 0,7 %   ĐẠT
+THẤT NGÔN BÁT CÚ     6/7 bài sạch · 1/329 ràng buộc = 0,3 %   ĐẠT
+```
+
+**Ba thứ phát hiện được, và hai trong đó là lỗi của người soạn chứ không phải verifier:**
+
+**(a) Bản dịch không dùng để hiệu chuẩn luật thanh.** Hai bản dịch *Nam quốc sơn hà*
+báo 6 và 4 lỗi bằng-trắc. Nguyên tác chữ Hán theo luật thơ Đường; bản dịch tiếng Việt
+giữ **nghĩa** và **số tiếng** nhưng không có gì bắt nó giữ **thanh điệu** — dịch giả
+phải chọn giữa sát nghĩa và đúng luật, và thường chọn sát nghĩa.
+
+Dùng bản dịch để hiệu chuẩn thì ta sẽ *"sửa"* verifier cho khớp với một bài vốn không
+theo luật — tức làm bộ đo **tệ đi** trong khi tưởng là đang làm nó tốt lên.
+
+Tiêu chí chọn mẫu không phải *"nổi tiếng"*, mà là *"được sáng tác **theo đúng thể**
+đang đo"*.
+
+**(b) Sai thể.** *Rằm tháng giêng* (bản dịch Xuân Thủy) là **lục bát** (6-8-6-8), không
+phải tứ tuyệt. Lỗi của người soạn corpus — và chính verifier bắt được.
+
+**(c) Tứ tuyệt mắc đúng lỗi thiết kế vừa sửa ở bát cú.** Bản cũ:
+`if not van_nhau(c2, c4): báo lỗi ở CÂU 4` — lấy câu 2 làm mốc cố định rồi đổ lỗi cho
+câu 4. Trên *Thu vịnh* (`cao · hiu · phủ · vào`), c1 và c4 hiệp ở vần "ao", c2 mới là
+câu lệch — bản cũ báo **câu 4**.
+
+Hai bộ kiểm viết cách nhau nhiều tháng mà mắc **cùng một lỗi**, vì cùng một thói quen:
+lấy một câu **cố định** làm chuẩn thay vì để chính bài quyết định vần của nó.
+
+### 9.5 Một điểm không nhất quán đã biết
+
+Tứ tuyệt **báo** thất vận ở câu 1; bát cú thì **không**. Với hàm thưởng, điều đó nghĩa
+là một bài thất vận hợp lệ bị trừ điểm ở thể này mà không bị ở thể kia.
+
+Chưa sửa: đổi hành vi bộ kiểm là đổi cả thước đo, và việc đó phải có phép đo đi kèm. Đã
+ghim bằng test để nó là điều **đã biết**, không phải bất ngờ cho người sau.
