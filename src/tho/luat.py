@@ -113,21 +113,59 @@ _THONG_VAN: dict[str, tuple[frozenset[str], ...]] = {
     #   2. KHONG lam mot cap nao trong `TestAmTinhKhongDuocChapNhanNham` thanh hiep van
     #
     # Cot "giam" la so cap Truyen Kieu ma RIENG nhom do cuu duoc, do khi them no vao
-    # sau cac nhom dung truoc. Tong: 440 -> 276 cap bi loai (27,0% -> 17,0%).
+    # sau cac nhom dung truoc. Dot 1 (11/09): 27,0% -> 17,0%.
+    #
+    # DOT 2, 14/09/2026: 17,0% -> 5,9% (554 -> 193 cap bi loai nham tren 3.253 cap).
+    #
+    # Vi sao lam tiep dot 2 sau khi da dung o 17%: bo kiem nay sap lam HAM THUONG
+    # cho RLVR (docs/plan-rlvr-tho.md). Voi mot bo LOC thi 17% bao nham la 17% bai
+    # tot bi loai oan — kho chiu, khong tich luy. Voi mot ham THUONG thi do la 17%
+    # van DUNG bi phat, va model se hoc TRANH chung; sai lech tich luy qua tung
+    # buoc cap nhat. Nguong khac han nhau, nen phai do lai.
     #
     # Mo ca chin cung mot luc roi thay am tinh do thi khong biet nhom nao gay ra — nen
     # them nhom moi cung phai lam tung cai mot. Xem docs/plan-sua-bo-kiem-van.md muc 8.
     #
     #: `anh ~ inh` — 48 cap. CHI dung voi am cuoi -nh: `ta ~ ti` phai la KHONG.
-    "nh": (frozenset({"a", "i"}),),
+    #: `anh ~ ênh` 7 (quanh/ghenh) · `ênh ~ inh` 6 (ghenh/dinh) — them 14/09/2026.
+    "nh": (
+        frozenset({"a", "i"}),
+        frozenset({"a", "ê"}),
+        frozenset({"ê", "i"}),
+    ),
     #: -i: `ơi ~ ươi` 47 cap (nơi/người) · `ôi ~ ui` nam trong {u, ư} san co.
-    "i": (frozenset({"ơ", "ươ"}),),
+    #:
+    #: Bon nhom duoi them 14/09/2026, cuu 159 cap — nhom lon nhat cua ca lan nay:
+    #:     `ai ~ ơi`  74 (hai/trời)   `ai ~ ươi` 49 (dài/cười)
+    #:     `ôi ~ ươi` 21 (xôi/người)  `ai ~ ôi`  15 (nài/bồi)
+    #:
+    #: VIET LA BON CAP ROI de moi cap giu duoc so dan chung rieng — nhung phai noi ro:
+    #: chung KHONG hep hon mot nhom gop {a, ơ, ô, ươ}.
+    #:
+    #: Ly do: `ơ ~ ô` da mo san o nhom toan cuc {o, ô, ơ}, va `ơ ~ ươ` mo tu dot 1. Cong
+    #: bon cap moi vao thi CA SAU cap trong {a, ơ, ô, ươ} deu hiep van o am cuoi -i.
+    #: Da kiem bang tay: tai~tơi, tai~tôi, tai~tươi, tơi~tôi, tơi~tươi, tôi~tươi — True
+    #: het.
+    #:
+    #: Ghi lai vi mot phien ban truoc cua chu thich nay noi "giu bon cap roi de khong mo
+    #: rong hon muc can" — mot loi hua ma ma nguon KHONG giu. Chu thich noi chat hon code
+    #: la kieu sai nguy hiem: nguoi doc sau se tin vao no thay vi do lai.
+    "i": (
+        frozenset({"ơ", "ươ"}),
+        frozenset({"a", "ơ"}),
+        frozenset({"a", "ươ"}),
+        frozenset({"ô", "ươ"}),
+        frozenset({"a", "ô"}),
+    ),
     #: -ng: `ung ~ ông` 14 (chung/hồng) · `ong ~ ung` 11 (phùng/lòng)
     #:      `ăng ~ ưng` 5 (trăng/chừng)
+    #:      `ương ~ ang` 126 (chương/càng, vàng/Vương) — them 14/09/2026, nhom DON LE
+    #:      cuu duoc nhieu nhat trong ca hai dot.
     "ng": (
         frozenset({"u", "ô"}),
         frozenset({"o", "u"}),
         frozenset({"ă", "ư"}),
+        frozenset({"ươ", "a"}),
     ),
     #: -n: `iên ~ ên` 16 (thiên/trên) · `en ~ iên` 9 (tiền/đen)
     "n": (
@@ -139,6 +177,8 @@ _THONG_VAN: dict[str, tuple[frozenset[str], ...]] = {
     "": (
         frozenset({"i", "ê"}),
         frozenset({"i", "ia"}),
+        #: `ưa ~ ơ` 63 cap (thưa/cờ, giờ/thưa) — them 14/09/2026.
+        frozenset({"ưa", "ơ"}),
     ),
 }
 
