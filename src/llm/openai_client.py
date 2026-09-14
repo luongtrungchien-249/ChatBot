@@ -31,6 +31,7 @@ from agents.ports.llm import (
 from config import get_settings
 from infra.logger import get_logger
 
+from . import models
 from .cost_meter import UsageRecord, record
 from .models import (
     CHEAP_TIMEOUT_S,
@@ -209,6 +210,14 @@ class OpenAiLlm:
         # khong co tham so nay va se tu choi ca request.
         if model.effort is not None:
             extra["reasoning_effort"] = effort
+
+        # NHIET DO chi cho route `poem`, va chi khi duoc dat. Mac dinh None = khong gui
+        # gi, tuc giu nguyen hanh vi cu cua MOI route.
+        #
+        # Doc `NHIET_THO` LUC CHAY chu khong nhap thang hang so: phep do A/B can doi no
+        # giua hai nhanh trong cung mot tien trinh.
+        if route == "poem" and models.NHIET_THO is not None:
+            extra["temperature"] = models.NHIET_THO
 
         response = await _get_client(model).chat.completions.create(
             model=model.id,

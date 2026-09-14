@@ -17,6 +17,7 @@ docs/plan-truy-hoi-xuyen-ngon-ngu.md muc 11):
 """
 
 from .luat import Loi, chu_thich_thanh, danh_so_tieng
+from .muoi_buoc import CAM_BE_CHU, quy_trinh
 from .y_dinh import TheTho
 
 #: Bai mau. CO Y chon ca dao quen thuoc chu khong tu sang tac: no chac chan dung luat
@@ -247,7 +248,9 @@ _THEO_THE: dict[TheTho, str] = {
 }
 
 
-def system_prompt(the_tho: TheTho) -> str:
+def system_prompt(
+    the_tho: TheTho, *, muoi_buoc: bool = False, cau_dat: bool = True
+) -> str:
     """System prompt cho mot the tho.
 
     Bang van duoc GHEP O DAY chu khong nam trong hang so `_LUAT_LUC_BAT`: no duoc sinh
@@ -257,9 +260,25 @@ def system_prompt(the_tho: TheTho) -> str:
     CHI GHEP CHO LUC BAT. That ngon tu tuyet co cau truc van khac (cuoi cau 1-2-4) nen
     bang nay khong dung cho no, va chua do duoc gi tren the do.
     """
+    goc = _THEO_THE[the_tho]
     if the_tho == "luc_bat":
-        return _THEO_THE[the_tho] + chr(10) + chr(10) + bang_van_goi_y()
-    return _THEO_THE[the_tho]
+        goc = goc + chr(10) + chr(10) + bang_van_goi_y()
+    if not muoi_buoc:
+        return goc
+    # CAM BE CHU dat TRUOC quy trinh, va quy trinh dat CUOI CUNG.
+    #
+    # Cuoi cung vi phan cuoi prompt la phan model bam sat nhat khi sinh — va phan quy
+    # trinh la thu quyet dinh HINH DANG dau ra. Dat no o giua thi model hay bo qua moc
+    # `BÀI THƠ:` va ta mat luon cho de cat.
+    return (
+        goc
+        + chr(10)
+        + chr(10)
+        + CAM_BE_CHU
+        + chr(10)
+        + chr(10)
+        + quy_trinh(cau_dat=cau_dat)
+    )
 
 
 def yeu_cau(chu_de: str) -> str:

@@ -34,6 +34,24 @@ dev = [
     "import-linter>=2.1",     # cuong che 8 luat kien truc
 ]
 
+# Phu thuoc HUAN LUYEN, co chu dich nam NGOAI phu thuoc chinh.
+#
+# torch + trl + vllm nang hang GB. De chung vao `dependencies` se bat MOI lan trien
+# khai bot phai tai ca dong do, trong khi bot chay khong can mot dong nao trong so ay.
+#
+#     uv sync --group rlvr
+#
+# Xem rlvr/huan_luyen.py. Script tu bao thieu phu thuoc kem lenh cai — khong nem
+# ImportError tran ra.
+rlvr = [
+    "torch>=2.4",
+    "transformers>=4.45",
+    "trl>=0.12",
+    "peft>=0.13",
+    "datasets>=3.0",
+    "accelerate>=1.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

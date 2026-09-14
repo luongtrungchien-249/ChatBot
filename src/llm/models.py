@@ -145,6 +145,47 @@ CHEAP_TIMEOUT_S = 45.0
 #: VAN NEN dung model KHONG reasoning cho route nay — xem `_GIA_OPENAI`.
 POEM_TIMEOUT_S = 90.0
 
+#: NHIET DO lay mau cho route `poem`. None = khong gui, tuc dung mac dinh cua API (1,0).
+#:
+#: TOAN DU AN CHUA TUNG DAT THAM SO NAY. Moi lan goi tu truoc toi nay deu chay o 1,0.
+#:
+#: VI SAO no dang duoc thu: `sang tao` la muc thap nhat cua he thong (1,15/5 = 23%), va
+#: DA THU HET cac duong o tang PROMPT — 9 lan can thiep, 8 lan that bai. Nhiet do nam o
+#: tang LAY MAU, khong phai tang prompt, nen no khong an vao "tran suc chua" cua phieu
+#: 10 buoc (xem `CAU_DAT` trong tho/sinh.py).
+#:
+#: HAI DUONG no co the an:
+#:   1. truc tiep — lay mau rong hon thi de ra chu la hon
+#:   2. gian tiep — tang PHUONG SAI giua cac ban, tuc lam viec CHON tro nen dang gia.
+#:      Can tren cua chon lo do o 1,0 chi la +0,575 (do 14/09); nhiet cao hon thi can
+#:      tren do rong ra.
+#:
+#: DA QUET 14/09/2026 VA GIU None. n=20 chu de moi muc, HAI luot doc lap, trung binh:
+#:
+#:                  1,0        1,2        1,4        1,6
+#:     sang tao     1,65       1,62       1,50       1,35     <- PHANG roi DI XUONG
+#:     ngon ngu     5,30       4,78       3,30       1,92     <- SUP
+#:     y nghia      7,55       7,20       6,20       4,15     <- sup
+#:     tat dinh    35,82      33,98      31,09      20,39     <- sup
+#:     van         14,19      11,32       9,01       2,92     <- sup
+#:     khung %       95         95         97,5       40      <- vo o 1,6
+#:     p50 ms     1.926      1.871      2.035     83.649      <- tham hoa o 1,6
+#:
+#: KET LUAN: nhiet do KHONG mua duoc sang tao. `sang tao` phang trong khoang 1,35-1,65
+#: tren CA BON muc, trong khi MOI chi so khac sup deu theo nhiet.
+#:
+#: DIEU NAY NOI MOT DIEU QUAN TRONG HON CA KET QUA. Trong thang cham, `sang tao` thuc
+#: chat la bo do CAU DAT ("cho diem toi da khi bai co mot CAU DAT"). Mot cau dat can
+#: Y, khong can PHUONG SAI. Lay mau rong hon cho ra chu LA hon, khong cho ra y HAY hon
+#: — nen nut that co khong nam o do rong lay mau.
+#:
+#: Ket qua nay cung bit not duong "nhiet cao -> phuong sai giua cac ban rong ra -> chon
+#: tro nen dang gia": `sang tao` khong nhuc nhich thi khong co gi rong ra de ma chon.
+#:
+#: DUNG BAT LEN ma khong do lai. Va neu do lai thi phai do CA `van` va `khung` — o 1,6
+#: chi 40% bai con dung khung 6-8.
+NHIET_THO: float | None = None
+
 
 _tho: ModelConfig | None = None
 

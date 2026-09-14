@@ -58,9 +58,18 @@ NGUONG: dict[str, float] = {
 #:     28,4%  + phu am `gi` boc xong con rong
 #:     27,0%  + hop nhat `yê` voi `iê`
 #:     17,0%  + chin nhom van thong khoa theo am cuoi
+#:      5,9%  + tam nhom nua, dot 2 ngay 14/09/2026
+#:
+#: Dot 2 cuu 361 cap. Nhom lon nhat: `ương ~ ang` 126 cap (chương/càng), roi
+#: `ai ~ ơi` 74, `ưa ~ ơ` 63, `ai ~ ươi` 49.
+#:
+#: VI SAO LAM TIEP sau khi da dung o 17%: bo kiem nay sap lam HAM THUONG cho RLVR
+#: (docs/plan-rlvr-tho.md). Bo LOC bao nham 17% thi loai oan 17% bai tot — khong
+#: tich luy. Ham THUONG bao nham 17% thi day model TRANH nhung van dung, va sai
+#: lech tich luy qua tung buoc cap nhat.
 #:
 #: HA duoc thi HA MOC XUONG theo. Tang len la hoi quy.
-MOC_VAN = 0.17
+MOC_VAN = 0.058
 
 
 def doc_bai(tep: Path) -> list[list[str]]:

@@ -10,6 +10,10 @@ kiem tra bao mot cau Kieu la sai luat, gan nhu chac chan la BO KIEM TRA SAI, kho
 phai Nguyen Du sai.
 """
 
+import itertools
+
+import pytest
+
 from tho import (
     Loi,
     danh_so_tieng,
@@ -403,21 +407,21 @@ class TestAmTinhKhongDuocChapNhanNham:
         for a, b in (("an", "ang"), ("tan", "tang"), ("mình", "mình" + "h"), ("tôi", "tôn")):
             assert not van_nhau(a, b), f"{a} ~ {b} KHONG hiep van"
 
-    def test_bon_nhom_CHUA_GIAI_THICH_DUOC_van_dong(self) -> None:
-        """Bon nhom nhieu dan chung nhat trong Kieu, va deu KHONG duoc mo.
+    def test_bon_nhom_moi_KHONG_ro_ra_am_cuoi_khac(self) -> None:
+        """Dot 2 (14/09) mo bon nhom lon. Moi cai phai dong dung cai no vua mo.
 
-        `{a, ươ}` co 69 dan chung voi am cuoi -ng — nhieu nhat trong tat ca. Nhung
-        `đường ~ vàng` khong phai van tieng Viet. Dan chung chua giai thich duoc thi
-        chua phai bang chung; xem plan muc 7.
+        Day la ve AM TINH cua `TestBonNhomDot2` o duoi — cung mot cap nguyen am, nhung
+        khac AM CUOI thi van phai la KHONG.
         """
         for a, b in (
-            ("đường", "vàng"),   # -ng  {a, ươ}   69 lan
-            ("trang", "nhường"),
-            ("vời", "ngài"),     # -i   {a, ơ}    35 lan
-            ("bài", "mười"),     # -i   {a, ươ}   32 lan
-            ("thưa", "cờ"),      # trống {ơ, ưa}  27 lan
+            ("đường", "vàn"),   # -ng mo {ươ, a}; -n thi khong
+            ("ưa", "a"),        # am tiet mo: {ưa, ơ} mo, {ưa, a} thi khong
+            ("mai", "mơ"),      # -i mo {a, ơ}; sang am tiet mo thi khong
+            ("tai", "tô"),      # -i mo {a, ô}; sang am tiet mo thi khong
+            ("ta", "tê"),       # -nh mo {a, ê}; khong am cuoi thi khong
+            ("thưa", "cơn"),    # {ưa, ơ} chi cho am tiet MO
         ):
-            assert not van_nhau(a, b), f"{a} ~ {b} chua duoc mo — xem plan muc 7"
+            assert not van_nhau(a, b), f"{a} ~ {b} KHONG hiep van"
 
     def test_hai_tieng_khong_lien_quan(self) -> None:
         for a, b in (("hoa", "sen"), ("mùa", "thu"), ("trăng", "sao"), ("nhà", "cửa")):
@@ -840,3 +844,179 @@ class TestTuDienDapBaoNhamChuKhongMoPhamViBat:
         assert "Wiktionary" in doc
         assert "CC BY-SA" in doc
         assert "kaikki.org" in doc
+
+
+class TestBonNhomDot2:
+    """Bon nhom mo ngay 14/09/2026 — va MOT QUYET DINH CU BI LAT LAI.
+
+    Phien truoc da xet dung bon nhom nay va CO Y KHONG MO, voi ly do ghi trong test
+    `test_bon_nhom_CHUA_GIAI_THICH_DUOC_van_dong`:
+
+        "`đường ~ vàng` khong phai van tieng Viet. Dan chung chua giai thich duoc thi
+         chua phai bang chung."
+
+    Ly do do SAI, va no sai theo mot cach dang ghi lai: no bac bo 126 dan chung tu
+    chinh van ban goc ma khong mo van ban ra xem. Doc cac cau that thi thay Nguyen Du
+    dung dung nhung cap ay lam van:
+
+        Hoa cười ngọc thốt đoan TRANG  /  Mây thua nước tóc, tuyết NHƯỜNG màu da
+        Khúc nhà tay lựa nên CHƯƠNG    /  Một thiên bạc mệnh, lại CÀNG não nhân
+        Gọi là gặp gỡ giữa ĐƯỜNG       /  Họa là người dưới suối VÀNG biết cho
+        Vân xem trang trọng khác VỜI   /  Khuôn trăng đầy đặn, nét NGÀI nở nang
+        Sầu tuôn đứt nối, châu sa vắn DÀI  /  Vân rằng: Chị cũng nực CƯỜI
+        Chờ xem ắt thấy hiển linh bây GIỜ  /  Một lời nói chửa kịp THƯA
+
+    Quyet dinh cu vi pham chinh nguyen tac ghi o dau ops/hieu_chuan_tho.py: "moi lan bo
+    kiem tra bao mot cau Truyen Kieu la sai luat, gan nhu chac chan la BO KIEM TRA SAI,
+    khong phai Nguyen Du sai." 126 dan chung tu mot tac pham da duoc thua nhan khong
+    phai "chua giai thich duoc" — chung la dinh nghia cua van thong.
+
+    Ket qua: bao nham tren Truyen Kieu 17,0% -> 5,9%.
+    """
+
+    @pytest.mark.parametrize(
+        ("a", "b", "so_cap"),
+        [
+            ("đường", "vàng", 126),
+            ("trang", "nhường", 126),
+            ("vời", "ngài", 61),
+            ("hai", "trời", 61),
+            ("bài", "mười", 39),
+            ("dài", "cười", 39),
+            ("thưa", "cờ", 63),
+            ("giờ", "thưa", 63),
+        ],
+    )
+    def test_hiep_van(self, a: str, b: str, so_cap: int) -> None:
+        assert van_nhau(a, b), f"{a} ~ {b} — {so_cap} dẫn chứng trong Truyện Kiều"
+
+    def test_bon_nhom_nho_hon_cung_hiep(self) -> None:
+        """`ôi ~ ươi` 21 cap · `ai ~ ôi` 15 · `anh ~ ênh` 7 · `ênh ~ inh` 6."""
+        for a, b in (("xôi", "người"), ("nài", "bồi"), ("quanh", "ghềnh"), ("ghềnh", "đình")):
+            assert van_nhau(a, b), f"{a} ~ {b} có dẫn chứng trong Truyện Kiều"
+
+    def test_bon_cap_roi_KHONG_hep_hon_mot_nhom_gop(self) -> None:
+        """Ghim dung SU THAT, khong ghim loi hua.
+
+        Chu thich dau tien toi viet cho bang nay noi "giu bon cap roi de khong mo rong
+        hon muc can". Kiem lai thi SAI: `ơ ~ ô` da mo san o nhom toan cuc {o, ô, ơ}, nen
+        cong bon cap moi vao la CA SAU cap trong {a, ơ, ô, ươ} deu hiep o am cuoi -i.
+
+        Test nay ton tai de khong ai doc chu thich roi tin rang bo kiem chat hon thuc te.
+        """
+        mau = {"a": "tai", "ơ": "tơi", "ô": "tôi", "ươ": "tươi"}
+        for x, y in itertools.combinations(mau.values(), 2):
+            assert van_nhau(x, y), f"{x} ~ {y}"
+
+    def test_KHONG_ro_sang_am_cuoi_khac(self) -> None:
+        """Cai thuc su giu cho hep lai la AM CUOI, khong phai cach viet nhom."""
+        for a, b in (("tai", "tơ"), ("tôi", "tơ"), ("tươi", "ta")):
+            assert not van_nhau(a, b), f"{a} ~ {b} khác âm cuối"
+
+
+class TestTuTuyetNeoVanVaoCauDaSo:
+    """Cung loi thiet ke da sua o bat_cu.py, phat hien ngay trong lan HIEU CHUAN dau.
+
+    Ban truoc: `if not van_nhau(c2, c4): bao loi o CAU 4` — lay cau 2 lam moc co dinh
+    va do loi cho cau 4, du cau 2 moi la cau lech.
+
+    Bat duoc tren «Thu vinh» (bon cau dau):  cao (c1) · hiu (c2) · phu (c3) · vào (c4)
+    c1 va c4 hiep nhau o van "ao"; c2 moi lech. Ban cu bao CAU 4.
+
+    Hai bo kiem viet cach nhau nhieu thang ma mac cung mot loi, vi cung mot thoi quen:
+    lay mot cau CO DINH lam chuan thay vi de chinh bai quyet dinh van cua no.
+    """
+
+    THU_VINH = (
+        "Trời thu xanh ngắt mấy tầng cao\n"
+        "Cần trúc lơ phơ gió hắt hiu\n"
+        "Nước biếc trông như tầng khói phủ\n"
+        "Song thưa để mặc bóng trăng vào"
+    )
+
+    def test_bao_dung_CAU_LECH_chu_khong_bao_cau_4(self) -> None:
+        loi = [x for x in kiem_that_ngon_tu_tuyet(self.THU_VINH) if x.loai == "van"]
+
+        assert [x.cau for x in loi] == [2]
+
+    def test_cau_4_lech_thi_van_bao_cau_4(self) -> None:
+        """Sua cho ca kia khong duoc lam mat ca nay."""
+        bai = self.THU_VINH.split("\n")
+        bai[1] = "Cần trúc lơ phơ gió thổi cao"
+        bai[3] = "Song thưa để mặc bóng trăng lên"
+
+        loi = [x for x in kiem_that_ngon_tu_tuyet("\n".join(bai)) if x.loai == "van"]
+
+        assert [x.cau for x in loi] == [4]
+
+    def test_tho_chuan_van_SACH(self) -> None:
+        canh_khuya = (
+            "Tiếng suối trong như tiếng hát xa\n"
+            "Trăng lồng cổ thụ bóng lồng hoa\n"
+            "Cảnh khuya như vẽ người chưa ngủ\n"
+            "Chưa ngủ vì lo nỗi nước nhà"
+        )
+
+        assert kiem_that_ngon_tu_tuyet(canh_khuya) == []
+
+
+class TestBanDichKhongDungDeHIEUCHUAN:
+    """Tieu chi chon mau khong phai "noi tieng", ma la "sang tac THEO DUNG the".
+
+    Hai ban dich «Nam quoc son ha» bao 6 va 4 loi bang-trac. Do KHONG phai loi cua
+    verifier: nguyen tac chu Han theo luat tho Duong, con ban dich giu NGHIA va SO TIENG
+    nhung khong co gi bat no giu THANH DIEU.
+
+    Dung ban dich de hieu chuan thi ta se "sua" verifier cho khop voi mot bai von khong
+    theo luat — tuc lam bo do TE DI trong khi tuong la dang lam no tot len.
+    """
+
+    BAN_DICH = (
+        "Sông núi nước Nam vua Nam ở\n"
+        "Rành rành định phận tại sách trời\n"
+        "Cớ sao lũ giặc sang xâm phạm\n"
+        "Chúng bay sẽ bị đánh tơi bời"
+    )
+
+    def test_ban_dich_SAI_bang_trac_va_do_la_dung(self) -> None:
+        loi = kiem_that_ngon_tu_tuyet(self.BAN_DICH)
+
+        assert [x for x in loi if x.loai == "bang_trac"], "bản dịch không giữ luật thanh"
+
+    def test_VAN_CHINH_dung_nhung_cau_1_THAT_VAN(self) -> None:
+        """Ban dich giu duoc so tieng va van chinh (cau 2 ~ cau 4).
+
+        Cau 1 ket bang "ở" (van "ơ"), khong hiep voi "trời"/"bời" (van "ơi") — tuc THAT
+        VAN o cau dau, mot bien the duoc thua nhan.
+        """
+        loi = kiem_that_ngon_tu_tuyet(self.BAN_DICH, kiem_bang_trac=False)
+
+        assert [x.cau for x in loi] == [1]
+        assert "thất vận thì bỏ qua" in loi[0].mo_ta
+
+    def test_KHONG_NHAT_QUAN_giua_hai_bo_kiem__ghim_de_thay(self) -> None:
+        """Tu tuyet BAO that van o cau 1; bat cu thi KHONG. Hai bo xu ly khac nhau.
+
+        Cai nay quan trong voi ham THUONG: mot bai that van hop le se bi tru diem o the
+        nay ma khong bi o the kia. Chua sua vi doi hanh vi bo kiem la doi ca thuoc do,
+        va viec do phai co phep do di kem.
+
+        Ghim o day de no la mot dieu DA BIET chu khong phai mot bat ngo cho nguoi sau.
+        """
+        from tho.bat_cu import kiem_that_ngon_bat_cu
+
+        bat_cu_that_van = "\n".join(
+            (
+                "Bước tới Đèo Ngang bóng xế chiều",
+                "Cỏ cây chen đá lá chen hoa",
+                "Lom khom dưới núi tiều vài chú",
+                "Lác đác bên sông chợ mấy nhà",
+                "Nhớ nước đau lòng con quốc quốc",
+                "Thương nhà mỏi miệng cái gia gia",
+                "Dừng chân đứng lại trời non nước",
+                "Một mảnh tình riêng ta với ta",
+            )
+        )
+
+        assert [x.cau for x in kiem_that_ngon_tu_tuyet(self.BAN_DICH, kiem_bang_trac=False)] == [1]
+        assert [x for x in kiem_that_ngon_bat_cu(bat_cu_that_van) if x.loai == "van"] == []
