@@ -14,6 +14,8 @@ on:
       - 'src/llm/models.py'
       - 'src/llm/reranker.py'
       - 'evals/**'
+      # Duong lam tho co bo danh gia rieng o buoc cuoi luong nay.
+      - 'src/tho/**'
 
 jobs:
   eval:
@@ -153,3 +155,33 @@ jobs:
             exit 0
           fi
           exit $code
+
+      # ---------------------------------------------------------------------
+      # Danh gia DUONG LAM THO. Tach buoc rieng vi no khong dung chung du lieu
+      # nao voi eval RAG — bo chuan tho la 40 chu de, khong phai qa.jsonl.
+      #
+      # `continue-on-error`: CHUA lam cong chan, co chu dich. Nguong o
+      # evals/runner_tho.py moi chay 4 luot, va mot trong so do (`bot - van
+      # xuoi` = 1,68) da nam duoi nguong ban dau vi NHIEU chu khong vi he thong.
+      # Chinh tep nay da ghi bai hoc do cho `Answer Relevance`: "mot job do mai
+      # la mot job khong ai doc nua".
+      #
+      # DIEU KIEN de bo `continue-on-error`: ~5 luot chay de biet tung nguong
+      # dao dong bao nhieu, roi dat nguong duoi muc thap nhat quan sat duoc mot
+      # khoang an toan.
+      - name: Chay eval THO
+        if: steps.khoa.outputs.co_khoa == 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          uv run python evals/runner_tho.py --so-luot 2
+          code=$?
+          set -e
+          if [ $code -eq 2 ]; then
+            echo "::warning title=Eval tho chua chay::thieu bo chuan hoac khong sinh du bai."
+            exit 0
+          fi
+          if [ $code -ne 0 ]; then
+            echo "::warning title=Eval tho TRUOT::xem bang o tren. Chua lam cong chan — xem chu thich."
+          fi
+          exit 0
