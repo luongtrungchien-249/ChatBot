@@ -169,8 +169,16 @@ class TestHamThuongCuaGRPO:
         with pytest.raises(ValueError, match="the_tho"):
             ham_thuong([SACH, SACH], the_tho=["luc_bat"])
 
-    def test_moi_diem_nam_trong_khoang_0_1(self) -> None:
+    def test_moi_diem_nam_trong_khoang_0_1_va_KHONG_BAO_GIO_None(self) -> None:
+        """TRL cho phep tra `None` cho mot ban ("bo qua ban nay khi tinh loi the").
+
+        Ta KHONG dung quyen do: mot ban khong cham duoc van phai co diem, neu khong thi
+        loi the trong nhom bi lech theo so lan bo do hong — tuc tin hieu huan luyen phu
+        thuoc vao su co ha tang. Kieu tra ve khai `float | None` chi de khop hop dong
+        cua TRL; test nay ghim rang thuc te khong bao gio co None.
+        """
         from huan_luyen import ham_thuong
 
         for d in ham_thuong([SACH, BE_CHU, CHEP, ""]):
+            assert d is not None
             assert 0.0 <= d <= 1.0

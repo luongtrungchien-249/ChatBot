@@ -63,7 +63,7 @@ def doc_chu_de(p: Path) -> list[dict[str, str]]:
     return [json.loads(d) for d in p.read_text(encoding="utf-8").splitlines() if d.strip()]
 
 
-def ham_thuong(completions: list[str], **kwargs: object) -> list[float]:
+def ham_thuong(completions: list[str], **kwargs: object) -> list[float | None]:
     """Ham thuong TRL goi. Tra ve mot so trong [0, 1] cho moi ban sinh.
 
     `the_tho` di theo tung dong du lieu chu khong ghi cung: mot ngay nao do train tren
@@ -88,6 +88,14 @@ def ham_thuong(completions: list[str], **kwargs: object) -> list[float]:
             f"the_tho co {len(the_tho)} phan tu nhung co {len(completions)} ban sinh — "
             "cham nham the tho se cho diem gan 0 cho MOI ban ma khong bao gi"
         )
+    # Kieu tra ve la `list[float | None]` chu khong `list[float]`, va do KHONG phai mot
+    # chi tiet cu phap: TRL cho phep ham thuong tra `None` cho mot ban de noi "bo qua
+    # ban nay khi tinh loi the". `list` la BAT BIEN ve kieu trong Python, nen
+    # `list[float]` khong dung duoc o cho doi `list[float | None]`.
+    #
+    # Ta khong bao gio tra None — mot ban khong cham duoc van phai co diem, neu khong
+    # thi loi the trong nhom bi lech theo so lan bo do hong. Nhung hop dong thi phai
+    # khai dung, va CI da bat duoc cho nay.
     return [thuong(c, t) for c, t in zip(completions, the_tho, strict=True)]
 
 

@@ -101,6 +101,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["torch.*", "trl.*", "peft.*", "datasets.*", "transformers.*"]
 ignore_missing_imports = true
+# `trl` xuat GRPOConfig/GRPOTrainer luc chay nhung khong khai bao lai trong `__all__`,
+# nen che do strict (`no_implicit_reexport`) tu choi chung. Day la dac diem cua thu vien,
+# khong phai loi cua ta — noi long RIENG cho bien gioi nay.
+implicit_reexport = true
 
 [tool.ruff]
 line-length = 100

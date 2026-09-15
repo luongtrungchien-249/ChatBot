@@ -89,7 +89,13 @@ jobs:
           python-version: "3.11"
           enable-cache: true
 
-      - run: uv sync --frozen --all-groups
+      # KHONG `--all-groups`: nhom `rlvr` keo theo torch (~2,5 GB) ma luong nay khong
+      # dung mot dong nao cua no. Luong nay chay danh gia RAG, khong cham toi rlvr/.
+      #
+      # ci.yml thi VAN dung `--all-groups`, co chu dich: o do mypy kiem bien gioi voi
+      # `trl`, va chinh phep kiem do vua bat mot loi hop dong that (`reward_funcs` doi
+      # `list[float | None]`, ta khai `list[float]`).
+      - run: uv sync --frozen --group dev
         if: steps.khoa.outputs.co_khoa == 'true'
 
       - name: Migrate
