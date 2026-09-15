@@ -51,6 +51,14 @@ _PHU_AM_DAU: tuple[str, ...] = (
 #: AM CUOI, xep DAI TRUOC NGAN de `ng` khong bi `n` cat mat.
 _AM_CUOI: tuple[str, ...] = ("ng", "nh", "ch", "m", "n", "p", "t", "c", "i", "y", "o", "u")
 
+#: Nguyen am tieng Viet (DA bo dau thanh). Dung de:
+#:   1. biet mot phan con lai sau khi cat phu am co hop le khong — xem `lay_van`
+#:   2. biet mot TIENG co phai am tiet tieng Viet khong — xem `tu_vung.tieng_la`
+#:
+#: Khong co `y` rieng le trong danh sach nay thi `ly`, `my` mat nguyen am. Co `y` thi
+#: `yeu`, `yen` cung dung. Ca hai deu la nguyen am chinh trong chinh ta tieng Viet.
+_NGUYEN_AM: frozenset[str] = frozenset("aăâeêioôơuưy")
+
 #: Cac cach VIET khac nhau cua CUNG MOT nguyen am. Day khong phai van thong.
 #:
 #: `yê` va `iê` la mot: `tiên`/`yên`, `thêu`/`yêu`, `duyên`/`hiền`. Chu `y` duoc dung
@@ -313,8 +321,24 @@ def lay_van(tieng: str) -> str:
     for phu_am in _PHU_AM_DAU:
         if chu.startswith(phu_am):
             con_lai = chu[len(phu_am) :]
-            if con_lai:
+            # PHAN CON LAI PHAI CO NGUYEN AM. Khong co thi phu am nay cat SAI, va phai
+            # de vong lap thu phu am ngan hon.
+            #
+            # LOI THAT, bat duoc 15/09/2026 khi dung bo do tieng khong hop le:
+            #
+            #     `gìn` -> bo dau `gin` -> cat `gi` -> con `n`   <- mat nguyen am
+            #
+            # `gìn` la `g` + `ìn`, khong phai `gi` + `n`. Cat nham thi `lay_van('gìn')`
+            # tra `'n'`, va tu do `gìn` KHONG BAO GIO hiep van voi bat cu thu gi —
+            # mot loi im lang trong chinh bo kiem van.
+            #
+            # Cung co che voi ca `qu`: `quen` phai la `qu` + `en`, con `quanh` thi cat
+            # `qu` con `anh` — ca hai deu co nguyen am nen khong sao. Rieng day la ca
+            # `gi` dung truoc phu am cuoi.
+            if con_lai and any(k in _NGUYEN_AM for k in con_lai):
                 return con_lai
+            if con_lai:
+                continue
             # Boc xong con RONG. Rieng `gi` va `qu` thi day la truong hop that va
             # thuong gap: `gì`, `gi`, `qu`. Cach phan tich truyen thong coi `gi` la
             # phu am dau, va nguyen am `i` bi NUOT vao chinh chu `i` cua `gi` — nen

@@ -26,6 +26,7 @@ tu lay doi, vi tieng thu hai cua tu lay la cho de bien dang nhat va cung la cho 
 vao vi tri van. Mot cum khong co trong day KHONG co nghia la no sai.
 """
 
+from .luat import _DAU_CAU, _NGUYEN_AM, _tach_van, lay_van
 from .tu_ghep_wiktionary import TU_GHEP_WIKT
 
 #: Danh sach cum KHONG CAN BAO — phan lon la tu lay, nhung co ca vai cum chi la
@@ -410,3 +411,64 @@ def cum_kha_nghi(bai: str, *, chat: bool = True) -> list[tuple[str, str]]:
 
 
 __all__ = ["TIENG_DAU", "TU_GHEP", "cum_kha_nghi", "cum_nghi_be"]
+
+
+def tieng_la(tieng: str) -> bool:
+    """`tieng` co phai mot AM TIET TIENG VIET hop le khong.
+
+    Cau truc am tiet tieng Viet huu han va deu dan: (phu am dau)(am dem)(AM CHINH)(am
+    cuoi) + thanh. Nen kiem duoc TAT DINH — khac han voi "cum hai tieng co nghia khong",
+    thu can ngu nghia va da that bai bon lan trong du an nay.
+
+    Dieu kien: AM CHINH phai toan nguyen am. `mìmh` cho am chinh `h` -> khong hop le.
+    """
+    v = lay_van(tieng.strip(_DAU_CAU).lower())
+    if not v:
+        return False
+    am_chinh, _ = _tach_van(v)
+    return bool(am_chinh) and all(k in _NGUYEN_AM for k in am_chinh)
+
+
+def tieng_khong_hop_le(bai: str) -> list[str]:
+    """Nhung TIENG khong phai am tiet tieng Viet. Rong = sach.
+
+    VI SAO BO DO NAY DUOC PHEP CHAN, trong khi ba bo do "vo nghia" khac thi khong:
+
+        bo do                              bao nham tren tho chuan
+        tieng khong hop le  (bo nay)              0,009%
+        cum bi be tu chinh ta                     0,00% nhung BO LOT `bầu gian`
+        cum van khong co trong tu dien 18k       79,3%
+        mach noi dung bang truong nghia          19,50%
+
+    Do 15/09/2026, bo qua dong chu thich cua corpus:
+
+        Truyen Kieu          22.778 tieng   bao nham 0   0,000%
+        that ngon bat cu        392 tieng   bao nham 0   0,000%
+        that ngon tu tuyet      224 tieng   bao nham 0   0,000%
+
+    Lan do dau tien bao nham 2 tieng, ca hai la `Gìn`/`gìn`. Do KHONG phai ca biên cua
+    bo do — no la mot loi that cua `lay_van`: `gìn` bi boc phu am kep `gi` roi con lai
+    `n`, mat nguyen am, nen `gìn` KHONG THE van voi gi het. Da sua trong `luat.py`
+    (`gìn ~ tin` truoc la False, nay la True). Bo do nay tim ra mot loi im lang
+    da nam trong kho tu lau.
+
+    NGUON GOC: nguoi dung cham tay va cho bai nay 0/0/0 —
+
+        "Lời cảm ơn gửi tận mìmh ơn thờ"
+
+    Bai do duoc may cham 32,71/45 tat dinh va 0,778/1,000 thuong; `cum_kha_nghi` khong
+    bat duoc gi. `mìmh` khong phai tieng Viet, va DO thi kiem duoc bang code.
+    """
+    ra: list[str] = []
+    for cau in bai.strip().split("\n"):
+        for t in cau.split():
+            goi = t.strip(_DAU_CAU)
+            # Tieng khong chua CHU CAI nao (`1975`, `—`) thi bo do nay khong co y
+            # kien. No kiem CAU TRUC AM TIET; mot con so khong phai am tiet sai, no
+            # la mot thu khac. Chan no o day bien bo LOC CUNG thanh cai tu choi bai
+            # tho co nam thang.
+            if not goi or not any(k.isalpha() for k in goi):
+                continue
+            if not tieng_la(goi):
+                ra.append(t)
+    return ra

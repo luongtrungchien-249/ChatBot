@@ -51,7 +51,7 @@ from .prompt import (
     yeu_cau_chon,
 )
 from .quy_trinh import TEN_TNTT, SoVet, VetBuoc, VetCon, vet_kiem_luat
-from .tu_vung import cum_kha_nghi, cum_nghi_be
+from .tu_vung import cum_kha_nghi, cum_nghi_be, tieng_khong_hop_le
 from .y_dinh import TheTho, YeuCauTho
 
 #: Bat model di QUA 10 BUOC va KHAI NGHIA tung chu van, trong CUNG mot luot goi.
@@ -817,6 +817,16 @@ async def sinh_tho(
     #
     # Nen bo do rong nam o `_xep_hang` (chon), bo do chat nam o day (chan).
     with so.do("kiem_noi_dung", "luat") as g:
+        # TIENG KHONG HOP LE di TRUOC `cum_kha_nghi`, vi no sach hon: 0,000% bao nham
+        # tren 23.394 tieng tho chuan, so voi 0,03%. `mìmh` khong phai mot chu bi be
+        # cho du van — no khong phai mot am tiet tieng Viet, va do la mot loi nang hon.
+        sai_truoc = [x for x in ung_vien if tieng_khong_hop_le(x[0])]
+        sach_tieng = [x for x in ung_vien if not tieng_khong_hop_le(x[0])]
+        if sach_tieng:
+            ung_vien = sach_tieng
+            sach_khung = [x for x in sach_khung if not tieng_khong_hop_le(x[0])] or sach_khung
+            tot_nhat, loi_tot_nhat = min(ung_vien, key=lambda x: _xep_hang(x[1], x[0]))
+
         be_truoc = [x for x in ung_vien if cum_kha_nghi(x[0])]
         sach_be = [x for x in ung_vien if not cum_kha_nghi(x[0])]
         if sach_be:
@@ -828,7 +838,19 @@ async def sinh_tho(
         cau_hay, dat_o_cho = doc_cau_dat(raw_tot) if muoi_buoc else ("", "")
         chep = so_cau_chep(tot_nhat)
         con_be = cum_kha_nghi(tot_nhat)
+        con_sai = tieng_khong_hop_le(tot_nhat)
         g.chi_tiet = (
+            VetCon(
+                ten="tiếng không phải tiếng Việt",
+                dat=not con_sai,
+                tom_tat=(
+                    f"loại {len(sai_truoc)}/{len(sai_truoc) + len(sach_tieng)} bản có tiếng "
+                    "không hợp lệ"
+                    if not con_sai
+                    else "MỌI bản đều có tiếng không hợp lệ: "
+                    + ", ".join(f"'{t}'" for t in con_sai)
+                ),
+            ),
             VetCon(
                 ten="chữ bị bẻ cho đủ vần",
                 dat=not con_be,
