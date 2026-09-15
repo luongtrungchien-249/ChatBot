@@ -17,6 +17,8 @@ BA NGUYEN TAC, moi cai chan mot kieu hong rieng cua RL.
      chep ca dao   -> diem luat tuyet doi ma khong sang tac gi     (`so_cau_chep`)
      be chu        -> "ngọt ngào" -> "ngọt ngao" LAM TANG diem van (`cum_kha_nghi`)
      lap chu       -> bai suy bien van an duoc diem ti le
+     tieng bia ra  -> "mìmh" khop van va khop thanh nhu mot tieng that
+                                                             (`tieng_khong_hop_le`)
 
    Lo hong thu hai nguy hiem nhat vi no duoc thuong TRUC TIEP: be chu lam diem van tang
    that, chu khong phai mot ke ho gian tiep.
@@ -34,14 +36,15 @@ from dataclasses import dataclass
 
 from .bat_cu import kiem_that_ngon_bat_cu
 from .luat import Loi, _cac_cau, kiem_luc_bat, kiem_that_ngon_tu_tuyet
-from .tu_vung import cum_kha_nghi
+from .tu_vung import cum_kha_nghi, tieng_khong_hop_le
 
-#: Trong so cac thanh phan. Cong lai bang 1,0.
+#: Trong so GOC. Xem `trong_so()` — the tho nao khong co rang buoc nao cua mot thanh
+#: phan thi thanh phan do bi bo di va phan con lai duoc chuan hoa lai.
 #:
 #: `van` nang nhat co chu dich: do 14/09 cho thay day dung la cho model manh hong nang
 #: nhat (gpt-5-mini duoc 2,2/20 van trong khi sang tao 3,0/5 — vuot ca moc ca dao).
 #: RLVR o day nham vao chinh cho do.
-TRONG_SO: dict[str, float] = {
+TRONG_SO_GOC: dict[str, float] = {
     "khung": 0.30,  # so tieng + so cau — rang buoc cung nhat
     "van": 0.35,
     "thanh": 0.25,  # bang-trac + niem
@@ -53,6 +56,11 @@ TRONG_SO: dict[str, float] = {
 #: Nhan chu khong tru: tru thi mot bai chep van con duong am de giu diem duong nho cac
 #: thanh phan khac. Nhan voi 0 thi chep = khong duoc gi, dut khoat.
 PHAT_CHEP = 0.0
+#: Cung hang voi `chep`, va vi mot ly do khac han: mot bai chua tieng khong phai
+#: tieng Viet la mot bai KHONG DOC DUOC. `mìmh` duoc may cham 0,778/1,000 trong khi
+#: nguoi cham 0/0/0 — day chinh la cho thang do va nguoi doc lech nhau nhat da tim
+#: thay. Nhan 0 chu khong 0,5: khong co phan nao cua bai do dang duoc thuong.
+PHAT_TIENG_SAI = 0.0
 PHAT_BE_CHU = 0.5
 PHAT_LAP = 0.5
 
@@ -92,6 +100,47 @@ def _ti_le_lap(bai: str) -> float:
     if not tieng:
         return 1.0
     return 1.0 - len(set(tieng)) / len(tieng)
+
+
+#: So cau CHUAN cua tung the — dung de tinh trong so, KHONG dung so cau that cua bai.
+#:
+#: Phai la so CHUAN chu khong phai so quan sat duoc, neu khong thi mot bai suy bien se
+#: duoc chuan hoa co loi cho no: bai mot cau -> khong co cap van nao -> bo trong so cua
+#: `van` -> con moi `khung`, va no an diem cao hon mot bai bon cau chi lech mot van.
+_SO_CAU_CHUAN: dict[str, int] = {
+    "luc_bat": 4,
+    "that_ngon_bat_cu": 8,
+    "that_ngon_tu_tuyet": 4,
+}
+
+
+def trong_so(the_tho: str) -> dict[str, float]:
+    """Trong so cho MOT the tho. Cong lai bang 1,0.
+
+    THANH PHAN KHONG CO RANG BUOC NAO THI KHONG CO TRONG SO. Nghe hien nhien, nhung no
+    la mot loi da chay that va chi lo ra khi do DONG GOP PHUONG SAI:
+
+        luc bat khong co luat DOI -> `_dem_rang_buoc` tra doi = 0 rang buoc
+        -> `_ti_le(0, 0)` tra 1,0 luon
+        -> nhung khi khung hong thi ta dat doi = 0,0
+
+    Tuc `doi` tro thanh mot BAN SAO NHI PHAN cua "khung co hong khong", mang trong so
+    0,10. Do 15/09 tren 10 nhom x 8 ban: `doi` co phuong sai CAO NHAT bang (std 0,4704)
+    va chiem 15,6% phuong sai cua R_total — de lap lai dung cai `khung` da noi.
+
+    Hau qua: `R_total` that su la 0,40·khung + 0,35·van + 0,25·thanh, khong phai bang
+    trong so da ghi. Trong GRPO thi do la khuech dai tin hieu khung them mot lan nua.
+
+    33 test cua ham nay khong bat duoc, vi chung kiem GIA TRI chu khong kiem DONG GOP
+    PHUONG SAI. Xem `TestDongGopPhuongSai`.
+
+    SUY TU SO RANG BUOC chu khong ghi hai bang cung: cach nay tu dung cho the tho them
+    vao sau, va khong the lech khoi `_dem_rang_buoc`.
+    """
+    rb = _dem_rang_buoc(the_tho, _SO_CAU_CHUAN.get(the_tho, 4))
+    co = {k: w for k, w in TRONG_SO_GOC.items() if rb[k] > 0}
+    tong = sum(co.values())
+    return {k: (co[k] / tong if k in co else 0.0) for k in TRONG_SO_GOC}
 
 
 def _dem_rang_buoc(the_tho: str, so_cau: int) -> dict[str, int]:
@@ -142,7 +191,8 @@ def phan_thuong(bai: str, the_tho: str = "luc_bat") -> ChiTietThuong:
     so_cau = len(_cac_cau(bai))
     rb = _dem_rang_buoc(the_tho, so_cau)
     nhom = _loi_theo_nhom(loi)
-    phan = {k: _ti_le(nhom[k], rb[k]) for k in TRONG_SO}
+    ts = trong_so(the_tho)
+    phan = {k: _ti_le(nhom[k], rb[k]) for k in TRONG_SO_GOC}
 
     # SAI KHUNG THI KHONG DUOC DIEM O CAC NHOM CON LAI.
     #
@@ -168,7 +218,7 @@ def phan_thuong(bai: str, the_tho: str = "luc_bat") -> ChiTietThuong:
         for k in ("van", "thanh", "doi"):
             phan[k] = 0.0
 
-    tho = sum(TRONG_SO[k] * phan[k] for k in TRONG_SO)
+    tho = sum(ts[k] * phan[k] for k in TRONG_SO_GOC)
 
     # --- Chong lach ---
     he_so = 1.0
@@ -183,6 +233,11 @@ def phan_thuong(bai: str, the_tho: str = "luc_bat") -> ChiTietThuong:
         he_so *= PHAT_CHEP
         ly_do.append(f"chép {chep} câu của bài mẫu (ngưỡng {NGUONG_CHEP:.0%})")
 
+    sai = tieng_khong_hop_le(bai)
+    if sai:
+        he_so *= PHAT_TIENG_SAI
+        ly_do.append("tiếng không phải tiếng Việt: " + ", ".join(f"'{t}'" for t in sai[:3]))
+
     be = cum_kha_nghi(bai)
     if be:
         he_so *= PHAT_BE_CHU
@@ -194,7 +249,13 @@ def phan_thuong(bai: str, the_tho: str = "luc_bat") -> ChiTietThuong:
         ly_do.append(f"lặp tiếng {lap:.0%} > ngưỡng {NGUONG_LAP:.0%}")
 
     return ChiTietThuong(
-        tong=tho * he_so,
+        # KEP THAT ve [0, 1], khong tin vao phep cong so thuc.
+        #
+        # `trong_so()` chia lai nen tong cac trong so ra 1,0000000000000002 chu khong
+        # dung 1,0. Mot bai hoan hao vi the vuot tran — nho, nhung ham nay HUA tra
+        # trong [0, 1] va GRPO dung thang con so do. Mot hop dong da khai thi phai giu
+        # bang code, khong bang hy vong rang phep cong khong troi.
+        tong=max(0.0, min(1.0, tho * he_so)),
         khung=phan["khung"],
         van=phan["van"],
         thanh=phan["thanh"],

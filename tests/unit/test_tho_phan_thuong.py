@@ -12,7 +12,7 @@ ma mot model duoc toi uu se tim ra.
 
 import pytest
 
-from tho.phan_thuong import NGUONG_LAP, TRONG_SO, phan_thuong, thuong
+from tho.phan_thuong import NGUONG_LAP, TRONG_SO_GOC, phan_thuong, thuong, trong_so
 
 SACH = (
     "Trâu ơi ta bảo trâu này\n"
@@ -33,8 +33,11 @@ QUA_DEO_NGANG = (
 
 
 class TestThangDo:
-    def test_trong_so_cong_lai_bang_mot(self) -> None:
-        assert sum(TRONG_SO.values()) == pytest.approx(1.0)
+    @pytest.mark.parametrize(
+        "the", ["luc_bat", "that_ngon_bat_cu", "that_ngon_tu_tuyet"]
+    )
+    def test_trong_so_cong_lai_bang_mot_o_MOI_the(self, the: str) -> None:
+        assert sum(trong_so(the).values()) == pytest.approx(1.0)
 
     def test_tho_chuan_duoc_diem_toi_da(self) -> None:
         assert thuong(SACH) == pytest.approx(1.0)
@@ -151,3 +154,67 @@ class TestChiTietDeGoLoi:
 
         assert (r.khung, r.van, r.thanh) == (1.0, 1.0, 1.0)
         assert r.ly_do_phat == ()
+
+
+class TestDongGopPhuongSai:
+    """Loai test ma 33 test truoc KHONG co — va vi the mot loi that da lot qua.
+
+    Cac test kia kiem GIA TRI: bai nay duoc bao nhieu diem. Nhung thu GRPO dung khong
+    phai gia tri, ma la PHUONG SAI TRONG NHOM: advantage = (r_i - mean) / std. Mot thanh
+    phan luon bang nhau o moi ban thi trong so cua no la mot con so chet; mot thanh phan
+    lap lai thanh phan khac thi trong so cua no la khuech dai nguy trang.
+
+    LOI DA CHAY THAT: luc bat khong co luat DOI, nhung `doi` van mang trong so 0,10. Do
+    15/09 tren 10 nhom x 8 ban that: `doi` co phuong sai CAO NHAT bang (std 0,4704) va
+    chiem 15,6% phuong sai cua R_total — de LAP LAI dung cai `khung` da noi.
+
+    `R_total` that su khi do la 0,40·khung + 0,35·van + 0,25·thanh, khong phai bang da
+    ghi trong code.
+    """
+
+    @pytest.mark.parametrize("the", ["luc_bat", "that_ngon_tu_tuyet"])
+    def test_the_KHONG_co_luat_doi_thi_doi_KHONG_co_trong_so(self, the: str) -> None:
+        assert trong_so(the)["doi"] == 0.0
+
+    def test_bat_cu_CO_luat_doi_thi_doi_VAN_co_trong_so(self) -> None:
+        """Sua cho the kia khong duoc lam mat cho the nay."""
+        assert trong_so("that_ngon_bat_cu")["doi"] > 0.0
+
+    def test_doi_KHONG_the_lam_doi_diem_cua_luc_bat(self) -> None:
+        """Ghim dung ca da hong: `doi` bam theo `khung`, nen neu con trong so thi no
+        cong them mot lan nua vao dung tin hieu khung.
+        """
+        r = phan_thuong(SACH)
+        ts = trong_so("luc_bat")
+        tong_ba_phan = sum(ts[k] * getattr(r, k) for k in ("khung", "van", "thanh"))
+
+        assert r.tong == pytest.approx(tong_ba_phan)
+
+    def test_trong_so_SUY_TU_so_rang_buoc_chu_khong_ghi_cung(self) -> None:
+        """Ghi hai bang cung thi chung se lech nhau vao ngay them mot the tho."""
+        import inspect
+
+        from tho import phan_thuong as mod
+
+        nguon = inspect.getsource(mod.trong_so)
+
+        assert "_dem_rang_buoc" in nguon
+
+    def test_dung_so_cau_CHUAN_chu_khong_so_cau_cua_BAI(self) -> None:
+        """Dung so cau quan sat duoc thi bai suy bien tu duoc chuan hoa co loi.
+
+        Bai mot cau -> khong co cap van nao -> bo trong so cua `van` -> con moi `khung`
+        -> va no an diem cao hon mot bai bon cau chi lech mot van.
+        """
+        mot_cau = "Trâu ơi ta bảo trâu này"
+        sai_van = "Trâu ơi ta bảo trâu này\nTrâu ra ngoài ruộng cùng ta sớm chiều"
+
+        assert thuong(sai_van) > thuong(mot_cau)
+
+    def test_ti_le_giua_ba_thanh_phan_GIU_NGUYEN_sau_khi_chuan_hoa(self) -> None:
+        """Bo `doi` chi duoc doi DO LON, khong duoc doi THU TU uu tien."""
+        ts = trong_so("luc_bat")
+        goc = TRONG_SO_GOC
+
+        assert ts["van"] > ts["khung"] > ts["thanh"]
+        assert ts["van"] / ts["khung"] == pytest.approx(goc["van"] / goc["khung"])
