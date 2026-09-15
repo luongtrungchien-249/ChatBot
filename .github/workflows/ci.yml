@@ -91,6 +91,14 @@ jobs:
 
       # --frozen: dung dung uv.lock, khong tu giai lai phu thuoc. Lock troi ma CI
       # van xanh thi CI dang kiem mot cay phu thuoc khac voi may ban.
+      #
+      # --all-groups KEO THEO nhom `rlvr` (torch ~2,5 GB). Giu co chu dich: mypy nho do
+      # kiem duoc BIEN GIOI voi `trl`, va phep kiem ay vua bat mot loi hop dong that —
+      # `reward_funcs` doi `list[float | None]` con ta khai `list[float]`, tuc ham
+      # thuong se bi TRL tu choi ngay buoc dau tien.
+      #
+      # `enable-cache: true` o tren lam phan tai chi dat o lan dau va moi khi uv.lock
+      # doi. evals.yml thi KHONG dung --all-groups: luong do khong cham toi rlvr/.
       - run: uv sync --frozen --all-groups
 
       - name: Kiem tra kieu (mypy strict)
