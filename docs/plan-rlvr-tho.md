@@ -175,6 +175,13 @@ Trọng số đề xuất, và lý do:
 
 ## 6. Lớp 3 — GRPO
 
+> **Thuật toán cụ thể của mục này đang được xét lại.** Đề xuất thay GRPO
+> bằng **FlashREINFORCE** (baseline theo batch, sequence trust region, sample-mean) có
+> kế hoạch riêng: **`docs/plan-flash-reinforce.md`**. Plan đó thi công cả ba cơ chế, và
+> nó chỉ ra hai lỗi trên đường RLVR hiện tại phải sửa TRƯỚC: prompt huấn luyện không
+> phải prompt phục vụ (cả hai cờ `muoi_buoc`/`cau_dat` đều ngược), và hàm thưởng không
+> bóc phần nháp của chế độ 10 bước. Xem §1 của plan đó.
+
 ### 6.1 Điều kiện bắt buộc
 
 **Không train được `gpt-4o-mini`/`gpt-5-mini` qua API.** Phải có model mở. Dự án đã lường
