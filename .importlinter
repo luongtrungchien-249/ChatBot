@@ -19,6 +19,7 @@ root_packages =
     main
     memory
     shared
+    tho
     tools
 
 [importlinter:contract:1]
@@ -78,3 +79,30 @@ source_modules =
     infra
 forbidden_modules =
     memory.repository.fact_repo
+
+
+[importlinter:contract:6]
+# `tho` la goi THUAN: luat tho, bo kiem, bo cham diem — khong I/O, khong goi model,
+# khong doc config. `agents/` import no (nhan dien y dinh + stage lam tho), va dieu do
+# HOP LE chinh vi no thuan.
+#
+# Truoc 17/09/2026 `tho` KHONG nam trong root_packages, nen khong luat nao gac no. No
+# thuan mot cach TINH CO, khong phai mot cach duoc giu. Ngay no import mot tang ha
+# tang thi `agents` phu thuoc ha tang GIAN TIEP, `lint-imports` van xanh, va unit test
+# cua agents bat dau doi bien moi truong — dung trieu chung ma L2 sinh ra de tranh, va
+# no da xay ra mot lan voi `tools/guard.py` (xem docs/plan-thi-cong.md muc 5.9).
+#
+# `shared` KHONG nam trong danh sach cam: no cung la goi thuan, va `tho` duoc dung no.
+name = L1b: tho la goi THUAN, khong duoc cham ha tang
+type = forbidden
+source_modules =
+    tho
+forbidden_modules =
+    adapters
+    config
+    infra
+    knowledge
+    llm
+    main
+    memory
+    tools

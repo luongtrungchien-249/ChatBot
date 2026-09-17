@@ -6,9 +6,11 @@ dieu khoan khong duoc bien mat.
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
+from agents.ports.llm import CheapRoute
 from agents.prompt.budget import CHARS_PER_TOKEN, TOKEN_BUDGET
 from agents.prompt.instructions import INSTRUCTIONS
 from agents.prompt.system import SYSTEM_PROMPT
@@ -143,8 +145,17 @@ class TestHangSoVaNganSach:
 
 
 class TestInstructionPrompt:
-    def test_co_du_ba_tac_vu_va_deu_la_hang_so(self) -> None:
-        assert sorted(INSTRUCTIONS) == ["extract_facts", "rewrite", "summarize"]
+    def test_KHOA_TRUNG_KHIT_CheapRoute(self) -> None:
+        """Bat bien ma chu thich cu chi NOI chu khong giu.
+
+        Truoc 17/09/2026 dict co 3 khoa (thieu `compress`) trong khi chu thich khang
+        dinh no trung voi `CheapRoute` — va test cu ghim CHINH cai lech do bang mot
+        danh sach go tay. Gio doi chieu thang voi kieu, nen them mot route chay nen
+        ma quen viet instruction se lam test DO.
+        """
+        assert set(INSTRUCTIONS) == set(get_args(CheapRoute))
+
+    def test_moi_instruction_deu_la_hang_so(self) -> None:
         for route, text in INSTRUCTIONS.items():
             assert "${" not in text, route
             assert len(text) > 100, route

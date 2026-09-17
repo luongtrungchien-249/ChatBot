@@ -12,15 +12,7 @@ Cung la HANG SO, cung mot ly do: hai lan chay cung mot tac vu phai ra cung mot
 prompt, neu khong thi khong so sanh duoc ket qua.
 """
 
-REWRITE_INSTRUCTION = """\nNhiệm vụ: viết lại câu hỏi cuối cùng thành một câu độc lập, đầy đủ ngữ cảnh, để dùng cho việc tìm kiếm.
-
-Quy tắc:
-- Thay đại từ và cách nói tắt bằng danh từ cụ thể lấy từ hội thoại phía trên.
-- Giữ nguyên ý định của người hỏi. Không thêm điều kiện họ không nói.
-- Giữ nguyên thuật ngữ, mã sản phẩm, tên riêng, con số. Không dịch, không diễn giải lại.
-- Câu hỏi đã đầy đủ ngữ cảnh rồi thì chép lại y nguyên.
-- Chỉ xuất ra đúng câu hỏi đã viết lại. Không giải thích, không thêm lời dẫn.
-"""
+from ..ports.llm import CheapRoute
 
 SUMMARIZE_INSTRUCTION = """\nNhiệm vụ: tóm tắt đoạn hội thoại nhóm dưới đây để lưu lại làm ngữ cảnh cho các câu hỏi sau.
 
@@ -79,9 +71,18 @@ Quy tắc:
 - Chỉ xuất ra bản rút gọn.
 """
 
-#: Khoa trung voi CheapRoute trong agents/ports/llm.py.
-INSTRUCTIONS: dict[str, str] = {
-    "rewrite": REWRITE_INSTRUCTION,
+#: Registry theo route. KHOA PHAI TRUNG KHIT `CheapRoute` trong agents/ports/llm.py.
+#:
+#: Ban truoc cua dong nay khang dinh dung dieu do trong khi dict chi co 3/4 khoa
+#: (thieu `compress`) — mot chu thich noi CHAT HON ma nguon, tuc kieu sai nguy hiem:
+#: nguoi doc sau tin no thay vi do lai. Gio bat bien ay duoc kiem bang
+#: `get_args(CheapRoute)` trong tests/unit/test_system_prompt.py, nen no khong the
+#: lech lan nua ma khong ai biet.
+#:
+#: Cac module goi `llm.cheap()` van import THANG hang so cua rieng no; dict nay ton tai
+#: de GIU bat bien "moi route chay nen deu co instruction", khong phai de tra cuu.
+INSTRUCTIONS: dict[CheapRoute, str] = {
     "summarize": SUMMARIZE_INSTRUCTION,
     "extract_facts": EXTRACT_FACTS_INSTRUCTION,
+    "compress": COMPRESS_TOOL_RESULT_INSTRUCTION,
 }

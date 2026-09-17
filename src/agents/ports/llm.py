@@ -93,7 +93,18 @@ class CallContext:
     trace_id: str
 
 
-CheapRoute = Literal["rewrite", "summarize", "extract_facts", "compress"]
+#: Cac route chay NEN, khong nam tren duong tra loi truc tiep.
+#:
+#: `rewrite` DA BI XOA (17/09/2026). Stage viet lai cau hoi bi bo ngay 07/09 vi
+#: vong ReAct tu viet duoc truy van co ngu canh, nhung bon manh cua no van nam lai
+#: — route o day, `MODELS["rewrite"]`, mot hang so instruction, va mot khoa trong
+#: `INSTRUCTIONS`. Khong cho nao goi. Cung ly do da xoa `KnowledgePort` va
+#: `ClockPort`: mot duong chet con te hon khong co duong, vi nguoi doc sau se
+#: tuong do la duong di that va thiet ke theo no.
+#:
+#: `INSTRUCTIONS` trong agents/prompt/instructions.py phai co DUNG cac khoa nay —
+#: co test doi chieu bang `get_args`, khong con la mot cau chu thich.
+CheapRoute = Literal["summarize", "extract_facts", "compress"]
 
 
 #: Duong phan hoi co the chay tren HAI model khac nhau.
@@ -128,5 +139,5 @@ class LlmPort(Protocol):
         route: CheapRoute,
         ctx: CallContext,
     ) -> str:
-        """Model re, chay nen: rewrite / summarize / extract-facts."""
+        """Model re, chay nen: summarize / extract_facts / compress."""
         ...
