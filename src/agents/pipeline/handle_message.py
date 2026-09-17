@@ -12,7 +12,7 @@ chung la ha tang, va handle_message phai test duoc ma khong can Redis.
 
 from asyncio import gather
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 from shared.result import Ok
@@ -120,7 +120,6 @@ class Deps:
     #: Stage 15 — xep hang viec nen L2. agents/ khong duoc import infra/ (L1) nen
     #: entrypoint tiem ham nay vao. Bo trong thi khong co viec nen nao chay.
     schedule_maintenance: Callable[[ThreadScope], Awaitable[None]] | None = None
-    _unused: tuple[()] = field(default=(), repr=False)
 
 
 def _co_tai_lieu(prompt: ContextEnvelope) -> bool:

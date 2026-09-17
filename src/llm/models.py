@@ -6,7 +6,7 @@ Nha cung cap: OpenAI. gpt-5-mini la ban ke nhiem chinh thuc cua o4-mini va re ho
 han (0,25 so voi 1,10 input; 2,00 so voi 4,40 output).
 
 Hien tai MOI route dung chung mot model — dung mot agent hoi dap. Khi nao tach
-multi-agent, ba route async (rewrite/summarize/extract_facts) nen ha xuong
+multi-agent, ba route chay nen (summarize/extract_facts/compress) nen ha xuong
 gpt-5-nano ($0,05 / $0,40): viec co hoc, khoi luong lon, khong nhay latency.
 Doi cho nay la doi mot file.
 """
@@ -14,7 +14,10 @@ Doi cho nay la doi mot file.
 from dataclasses import dataclass
 from typing import Literal
 
-Route = Literal["reply", "rewrite", "summarize", "extract_facts", "compress", "poem"]
+#: `rewrite` da bi xoa 17/09/2026 — xem chu thich o `CheapRoute`
+#: (agents/ports/llm.py). Stage viet lai cau hoi bi bo tu 07/09; route, gia va
+#: instruction cua no nam lai them muoi ngay ma khong cho nao goi.
+Route = Literal["reply", "summarize", "extract_facts", "compress", "poem"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +77,6 @@ _GPT_5_MINI = {
 #: khong phai tang effort.
 MODELS: dict[Route, ModelConfig] = {
     "reply": ModelConfig(effort="low", max_tokens=16_000, **_GPT_5_MINI),  # type: ignore[arg-type]
-    "rewrite": ModelConfig(effort="low", max_tokens=2_000, **_GPT_5_MINI),  # type: ignore[arg-type]
     "summarize": ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI),  # type: ignore[arg-type]
     "extract_facts": ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI),  # type: ignore[arg-type]
     # Nen ket qua cong cu. Route RIENG chu khong dung chung 'summarize': gop lai thi

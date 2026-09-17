@@ -31,7 +31,6 @@ _RA = LlmUsage(input_tokens=0, output_tokens=1_000_000, cache_read_tokens=0, cac
 #: Moi route hop le. `poem` la route DUY NHAT khong nam trong `MODELS`.
 _MOI_ROUTE: tuple[Route, ...] = (
     "reply",
-    "rewrite",
     "summarize",
     "extract_facts",
     "compress",

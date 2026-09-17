@@ -37,6 +37,14 @@ CANARIES: list[tuple[str, Path, str, list[str]]] = [
         "from config import get_settings\n\n__all__ = ['get_settings']\n",
         ["lint-imports"],
     ),
+    # `tho` la goi THUAN va `agents/` import no. Canary nay chung minh tinh thuan
+    # do duoc GIU chu khong dung mot cach tinh co — xem hop dong 6 trong .importlinter.
+    (
+        "L1b: tho la goi THUAN, khong cham ha tang",
+        SRC / "tho" / "_canary_infra.py",
+        "from infra.logger import get_logger\n\n__all__ = ['get_logger']\n",
+        ["lint-imports"],
+    ),
     (
         "L5: moi adapter la mot hop kin",
         SRC / "adapters" / "cli" / "_canary_cross.py",

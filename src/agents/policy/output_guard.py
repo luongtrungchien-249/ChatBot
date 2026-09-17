@@ -29,7 +29,7 @@ no khong the tu hong.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from shared.secrets import (
     che_bi_mat,
@@ -73,7 +73,6 @@ class OutputVerdict:
     loai_ca_nhan: tuple[str, ...] = ()
     #: Co <tai_lieu> trong prompt ma cau tra loi khong neu nguon nao.
     thieu_trich_dan: bool = False
-    _unused: tuple[()] = field(default=(), repr=False)
 
 
 def bo_markdown(text: str) -> str:
