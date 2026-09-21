@@ -61,6 +61,14 @@ def is_web_search_available() -> bool:
     return get_settings().TAVILY_API_KEY != ""
 
 
+def _parse_domain(url: str) -> str:
+    """Rut domain tu URL. Khong import urllib de giu nhe — regex du cho HTTP(S)."""
+    import re as _re
+
+    match = _re.search(r"https?://([^/?#]+)", url)
+    return match.group(1) if match else ""
+
+
 async def run_web_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip():
@@ -89,9 +97,33 @@ async def run_web_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     if not results:
         return "Khong tim thay ket qua nao cho truy van nay."
 
-    return "\n\n".join(
-        f"[{i}] {r.get('title') or '(khong co tieu de)'}\n"
-        f"Nguon: {r.get('url') or ''}\n"
-        f"{(r.get('content') or '').strip()}"
-        for i, r in enumerate(results, start=1)
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    header = (
+        f"=== KẾT QUẢ TÌM KIẾM WEB ===\n"
+        f"Truy vấn: \"{query}\"\n"
+        f"Số kết quả: {len(results)}\n"
+        f"Thời điểm: {now}"
     )
+
+    blocks: list[str] = []
+    for i, r in enumerate(results, start=1):
+        url = r.get("url") or ""
+        title = r.get("title") or "(khong co tieu de)"
+        content = (r.get("content") or "").strip()
+        score = r.get("score")
+        published = r.get("published_date")
+        domain = _parse_domain(url)
+
+        lines = [f"[{i}] {title}", f"URL: {url}"]
+        if domain:
+            lines.append(f"Domain: {domain}")
+        if score is not None:
+            lines.append(f"Điểm liên quan: {score:.2f}")
+        if published:
+            lines.append(f"Ngày xuất bản: {published}")
+        lines.append(f"Nội dung:\n{content}")
+        blocks.append("\n".join(lines))
+
+    return header + "\n\n" + "\n\n".join(blocks)

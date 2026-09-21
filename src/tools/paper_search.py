@@ -102,6 +102,8 @@ class Paper:
     url: str | None = None
     abstract: str | None = None
     citations: int | None = None
+    authors: str | None = None
+    venue: str | None = None
 
 
 def _clean(text: str) -> str:
@@ -137,6 +139,21 @@ def _reconstruct_abstract(index: Any) -> str | None:
     return _clean(" ".join(words[i] for i in sorted(words)))
 
 
+def _format_authors(raw_authors: list[Any], max_show: int = 3) -> str | None:
+    """Rut ten tac gia, cat 'et al.' neu qua nhieu."""
+    names: list[str] = []
+    for a in raw_authors:
+        if isinstance(a, dict):
+            name = a.get("display_name") or a.get("name") or a.get("given", "")
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+    if not names:
+        return None
+    if len(names) <= max_show:
+        return ", ".join(names)
+    return ", ".join(names[:max_show]) + f" et al. ({len(names)} tác giả)"
+
+
 async def _from_openalex(client: httpx.AsyncClient, query: str, n: int) -> list[Paper]:
     data = await _get_json(client, f"https://api.openalex.org/works?search={query}&per_page={n}")
     papers: list[Paper] = []
@@ -145,6 +162,14 @@ async def _from_openalex(client: httpx.AsyncClient, query: str, n: int) -> list[
         if not isinstance(title, str):
             continue
         doi_url = w.get("doi")
+        # Tac gia: OpenAlex tra ve trong authorships[].author.display_name
+        raw_authors = [
+            a.get("author", {}) for a in (w.get("authorships") or []) if isinstance(a, dict)
+        ]
+        # Venue: lay tu primary_location.source.display_name
+        loc = w.get("primary_location") or {}
+        venue_src = loc.get("source") or {} if isinstance(loc, dict) else {}
+        venue = venue_src.get("display_name") if isinstance(venue_src, dict) else None
         papers.append(
             Paper(
                 title=_clean(title),
@@ -154,6 +179,8 @@ async def _from_openalex(client: httpx.AsyncClient, query: str, n: int) -> list[
                 abstract=_reconstruct_abstract(w.get("abstract_inverted_index")),
                 citations=w.get("cited_by_count"),
                 source="OpenAlex",
+                authors=_format_authors(raw_authors),
+                venue=_clean(venue) if isinstance(venue, str) else None,
             )
         )
     return papers
@@ -177,6 +204,7 @@ async def _from_arxiv(client: httpx.AsyncClient, query: str, n: int) -> list[Pap
         summary = re.search(r"<summary>([\s\S]*?)</summary>", entry)
         ident = re.search(r"<id>([\s\S]*?)</id>", entry)
         published = re.search(r"<published>(\d{4})", entry)
+        authors_raw = re.findall(r"<author>\s*<name>([\s\S]*?)</name>", entry)
         papers.append(
             Paper(
                 title=_clean(title_match.group(1)),
@@ -184,13 +212,15 @@ async def _from_arxiv(client: httpx.AsyncClient, query: str, n: int) -> list[Pap
                 url=_clean(ident.group(1)) if ident else None,
                 abstract=_clean(summary.group(1)) if summary else None,
                 source="arXiv",
+                authors=_format_authors([{"name": a} for a in authors_raw]) if authors_raw else None,
+                venue="arXiv",
             )
         )
     return papers
 
 
 async def _from_semantic_scholar(client: httpx.AsyncClient, query: str, n: int) -> list[Paper]:
-    fields = "title,abstract,year,externalIds,citationCount,url,tldr"
+    fields = "title,abstract,year,externalIds,citationCount,url,tldr,authors,venue"
     key = get_settings().SEMANTIC_SCHOLAR_API_KEY
     data = await _get_json(
         client,
@@ -206,6 +236,8 @@ async def _from_semantic_scholar(client: httpx.AsyncClient, query: str, n: int) 
         tldr = p.get("tldr") or {}
         # TLDR ngan va sat y hon abstract — uu tien khi co.
         summary = tldr.get("text") or p.get("abstract")
+        raw_authors = p.get("authors") or []
+        venue_raw = p.get("venue")
         papers.append(
             Paper(
                 title=_clean(title),
@@ -215,6 +247,8 @@ async def _from_semantic_scholar(client: httpx.AsyncClient, query: str, n: int) 
                 abstract=_clean(summary) if isinstance(summary, str) else None,
                 citations=p.get("citationCount"),
                 source="Semantic Scholar",
+                authors=_format_authors(raw_authors),
+                venue=_clean(venue_raw) if isinstance(venue_raw, str) and venue_raw.strip() else None,
             )
         )
     return papers
@@ -239,6 +273,15 @@ async def _from_crossref(client: httpx.AsyncClient, query: str, n: int) -> list[
             else None
         )
         abstract = w.get("abstract")
+        # Crossref: tac gia trong author[].given + author[].family
+        raw_authors = [
+            {"name": f"{a.get('given', '')} {a.get('family', '')}".strip()}
+            for a in (w.get("author") or [])
+            if isinstance(a, dict)
+        ]
+        # Venue: container-title (ten tap chi / hoi nghi)
+        container = w.get("container-title")
+        venue = container[0] if isinstance(container, list) and container else None
         papers.append(
             Paper(
                 title=_clean(titles[0]),
@@ -250,6 +293,8 @@ async def _from_crossref(client: httpx.AsyncClient, query: str, n: int) -> list[
                 else None,
                 citations=w.get("is-referenced-by-count"),
                 source="Crossref",
+                authors=_format_authors(raw_authors),
+                venue=_clean(venue) if isinstance(venue, str) else None,
             )
         )
     return papers
@@ -282,6 +327,8 @@ def _merge(groups: list[list[Paper]]) -> list[Paper]:
             source=existing.source
             if paper.source in existing.source
             else f"{existing.source}, {paper.source}",
+            authors=existing.authors or paper.authors,
+            venue=existing.venue or paper.venue,
         )
 
     # Nhieu trich dan len truoc; bai chua co trich dan (preprint moi) xuong duoi.
@@ -386,20 +433,39 @@ async def run_paper_search(
     if not papers:
         return f'Khong tim thay bai bao nao cho truy van "{query}".'
 
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Trang thai tung nguon: ✓ thanh cong, ✗ that bai.
+    trang_thai = " | ".join(
+        f"{n} {'✗' if n in failed else '✓'}" for n in names
+    )
+    header = (
+        f"=== KẾT QUẢ TÌM KIẾM BÀI BÁO ===\n"
+        f"Truy vấn: \"{query}\"\n"
+        f"Tổng bài (sau khử trùng): {len(papers)}\n"
+        f"Nguồn: {trang_thai}\n"
+        f"Thời điểm: {now}"
+    )
+
     blocks: list[str] = []
     for i, p in enumerate(papers, start=1):
-        lines = [
-            f"[{i}] {p.title}",
-            f"Nam: {p.year or 'khong ro'} | Trich dan: "
-            f"{p.citations if p.citations is not None else 'khong ro'} | Nguon: {p.source}",
-        ]
+        lines = [f"[{i}] {p.title}"]
+        if p.authors:
+            lines.append(f"Tác giả: {p.authors}")
+        lines.append(
+            f"Năm: {p.year or 'không rõ'} | Trích dẫn: "
+            f"{p.citations if p.citations is not None else 'không rõ'} | "
+            f"Tìm thấy trên: {p.source}"
+        )
+        if p.venue:
+            lines.append(f"Tạp chí/Hội nghị: {p.venue}")
         if p.doi:
             lines.append(f"DOI: {p.doi}")
         if p.url:
             lines.append(f"URL: {p.url}")
         if p.abstract:
-            lines.append(f"Tom tat: {p.abstract[:700]}")
+            lines.append(f"Tóm tắt: {p.abstract[:700]}")
         blocks.append("\n".join(lines))
 
-    note = f"\n\n(Luu y: khong lay duoc ket qua tu {', '.join(failed)}.)" if failed else ""
-    return "\n\n".join(blocks) + note
+    return header + "\n\n" + "\n\n".join(blocks)

@@ -183,19 +183,42 @@ def _so(gia_tri: Any) -> int | None:
         return None
 
 
+def _parse_duration(iso: str | None) -> str | None:
+    """Chuyen ISO 8601 duration (PT1H2M34S) sang dang doc duoc (1:02:34)."""
+    if not iso or not isinstance(iso, str):
+        return None
+    import re as _re
+
+    match = _re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso)
+    if not match:
+        return None
+    h, m, s = (int(x) if x else 0 for x in match.groups())
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def _dinh_dang(item: dict[str, Any]) -> str:
     snippet = item.get("snippet") or {}
     thong_ke = item.get("statistics") or {}
+    chi_tiet = item.get("contentDetails") or {}
 
     tieu_de = snippet.get("title") or "(khong co tieu de)"
     kenh = snippet.get("channelTitle") or "(khong ro kenh)"
     ngay = (snippet.get("publishedAt") or "")[:10]
+    mo_ta_raw = snippet.get("description") or ""
+    mo_ta = mo_ta_raw[:200].strip()
+    if len(mo_ta_raw) > 200:
+        mo_ta += "..."
+    thoi_luong = _parse_duration(chi_tiet.get("duration"))
 
     xem = _so(thong_ke.get("viewCount"))
     thich = _so(thong_ke.get("likeCount"))
     binh_luan = _so(thong_ke.get("commentCount"))
 
     dong = [f"{tieu_de}", f"Kenh: {kenh}" + (f" | Dang ngay: {ngay}" if ngay else "")]
+    if thoi_luong:
+        dong.append(f"Thoi luong: {thoi_luong}")
     dong.append(f"Luot xem: {xem:,}".replace(",", ".") if xem is not None else "Luot xem: khong co")
     # Phan biet AN voi BANG KHONG. Gop lai la day model toi cho bia mot con so.
     dong.append(
@@ -209,6 +232,8 @@ def _dinh_dang(item: dict[str, Any]) -> str:
         else "Binh luan: da tat hoac bi an"
     )
     dong.append(f"Link: https://www.youtube.com/watch?v={item.get('id', '')}")
+    if mo_ta:
+        dong.append(f"Mo ta: {mo_ta}")
     return "\n".join(dong)
 
 
@@ -237,7 +262,7 @@ async def run_youtube_stats(payload: dict[str, Any], _ctx: CallContext) -> str:
     response = await get_http().get(
         _ENDPOINT,
         params={
-            "part": "snippet,statistics",
+            "part": "snippet,statistics,contentDetails",
             "id": ",".join(ids),
             "key": get_settings().YOUTUBE_API_KEY,
         },
@@ -253,6 +278,14 @@ async def run_youtube_stats(payload: dict[str, Any], _ctx: CallContext) -> str:
             "hoac ID sai. Hay noi thang, dung suy doan noi dung."
         )
 
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    header = (
+        f"=== SỐ LIỆU VIDEO YOUTUBE ===\n"
+        f"Thời điểm tra cứu: {now}"
+    )
+
     khoi = [_dinh_dang(it) for it in items]
 
     # Id gui di ma khong quay ve: video rieng tu hoac da xoa. Im lang bo qua se lam
@@ -267,7 +300,7 @@ async def run_youtube_stats(payload: dict[str, Any], _ctx: CallContext) -> str:
         "Day la so lieu tai THOI DIEM TRA CUU va se thay doi. "
         "YouTube khong con cong bo so luot khong thich tu 12/2021."
     )
-    return "\n\n".join(khoi)
+    return header + "\n\n" + "\n\n".join(khoi)
 
 
 async def _lay_thong_ke(ids: list[str]) -> list[dict[str, Any]]:
@@ -275,7 +308,7 @@ async def _lay_thong_ke(ids: list[str]) -> list[dict[str, Any]]:
     response = await get_http().get(
         _ENDPOINT,
         params={
-            "part": "snippet,statistics",
+            "part": "snippet,statistics,contentDetails",
             "id": ",".join(ids),
             "key": get_settings().YOUTUBE_API_KEY,
         },
@@ -335,10 +368,24 @@ async def run_youtube_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     if not items:
         return f"Tim thay video nhung khong lay duoc so lieu cho: {query}."
 
-    khoi = [_dinh_dang(it) for it in items]
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    header = (
+        f"=== KẾT QUẢ TÌM KIẾM YOUTUBE ===\n"
+        f"Truy vấn: \"{query}\"\n"
+        f"Số video tìm được: {len(items)}\n"
+        f"Xếp theo: Độ liên quan (YouTube)\n"
+        f"Thời điểm: {now}"
+    )
+
+    khoi: list[str] = []
+    for i, it in enumerate(items, start=1):
+        khoi.append(f"[{i}] {_dinh_dang(it)}")
+
     khoi.append(
-        "Ket qua sap theo DO LIEN QUAN cua YouTube, khong phai theo luot thich. "
+        "Kết quả xếp theo ĐỘ LIÊN QUAN của YouTube, không phải theo lượt thích. "
         "Hay doi chieu tieu de voi thu ban dang tim; lech thi noi ro la khong chac cung "
         "mot video. So lieu la tai THOI DIEM TRA CUU."
     )
-    return "\n\n".join(khoi)
+    return header + "\n\n" + "\n\n".join(khoi)

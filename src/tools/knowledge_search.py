@@ -337,7 +337,7 @@ async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str
             khac=_la_khac(chon),
             so_doan=len(chunks),
         )
-        return _dinh_dang(chunks) if chunks else _KHONG_TIM_THAY
+        return _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY
 
     # PHAM VI di cung cau hoi, y het hop dong cua memory_fact: mot nhom chi doc
     # duoc tai lieu 'chung' va tai lieu cua chinh no. Truoc day khong co tham so
@@ -362,7 +362,7 @@ async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str
         )
         return _danh_sach_lua_chon(ung_vien)
 
-    return _dinh_dang(chunks) if chunks else _KHONG_TIM_THAY
+    return _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY
 
 
 #: Cau nay di thang vao prompt, va no la don bay manh nhat cua ca luong: no den DUNG
@@ -392,11 +392,32 @@ _KHONG_TIM_THAY = (
 )
 
 
-def _dinh_dang(chunks: list[RetrievedChunk]) -> str:
-    return "\n\n".join(
-        f"[{i}] Nguồn: {c.doc_title}"
-        + (f" — mục: {c.section}" if c.section else "")
-        + (f" — trang {c.page}" if c.page else "")
-        + f"\n{c.content}"
-        for i, c in enumerate(chunks, start=1)
+def _dinh_dang(chunks: list[RetrievedChunk], query: str = "") -> str:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    header = (
+        f"=== KẾT QUẢ TRA CỨU TÀI LIỆU NỘI BỘ ===\n"
+        f"Truy vấn gốc: \"{query}\"\n"
+        f"Số đoạn tìm được: {len(chunks)}\n"
+        f"Phương pháp: hybrid (vector + BM25 + rerank)\n"
+        f"Thời điểm: {now}"
     )
+
+    blocks: list[str] = []
+    for i, c in enumerate(chunks, start=1):
+        lines = [f"[{i}] Nguồn: {c.doc_title}"]
+        if c.section:
+            lines.append(f"Mục: {c.section}")
+        if c.page:
+            lines.append(f"Trang: {c.page}")
+        if c.score is not None and c.score > 0:
+            lines.append(f"Điểm liên quan: {c.score:.2f}")
+        if c.distance is not None:
+            lines.append(f"Khoảng cách cosine: {c.distance:.4f}")
+        if c.chunk_id:
+            lines.append(f"ID đoạn: {c.chunk_id}")
+        lines.append(f"Nội dung:\n{c.content}")
+        blocks.append("\n".join(lines))
+
+    return header + "\n\n" + "\n\n".join(blocks)
