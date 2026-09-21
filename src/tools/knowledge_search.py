@@ -9,6 +9,7 @@ thieu khoa: cho model thay mot cong cu roi de no tra ve rong lien tuc la day no
 bia ra noi dung tai lieu.
 """
 
+from datetime import UTC
 from typing import Any
 
 from agents.domain.knowledge import RetrievedChunk
@@ -393,9 +394,9 @@ _KHONG_TIM_THAY = (
 
 
 def _dinh_dang(chunks: list[RetrievedChunk], query: str = "") -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TRA CỨU TÀI LIỆU NỘI BỘ ===\n"
         f"Truy vấn gốc: \"{query}\"\n"

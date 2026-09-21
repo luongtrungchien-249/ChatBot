@@ -5,6 +5,7 @@ SERP thuong. Bot duoc mot vong fetch trang roi boc HTML — vong do vua cham, vu
 them mot be mat de dinh HTML rac vao prompt.
 """
 
+from datetime import UTC
 from typing import Any
 
 import httpx
@@ -97,9 +98,9 @@ async def run_web_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     if not results:
         return "Khong tim thay ket qua nao cho truy van nay."
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TÌM KIẾM WEB ===\n"
         f"Truy vấn: \"{query}\"\n"

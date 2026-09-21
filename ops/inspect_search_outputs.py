@@ -18,7 +18,7 @@ Cách chạy:
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Đảm bảo import được src/
@@ -30,12 +30,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from agents.domain.knowledge import RetrievedChunk
-from tools.guard import wrap_observation
-from tools.knowledge_search import _dinh_dang as format_knowledge
-from tools.paper_search import Paper
-from tools.web_search import _parse_domain
-from tools.youtube import _dinh_dang as format_youtube, _parse_duration
+from agents.domain.knowledge import RetrievedChunk  # noqa: E402
+from tools.guard import wrap_observation  # noqa: E402
+from tools.knowledge_search import _dinh_dang as format_knowledge  # noqa: E402
+from tools.paper_search import Paper  # noqa: E402
+from tools.web_search import _parse_domain  # noqa: E402
+from tools.youtube import _dinh_dang as format_youtube  # noqa: E402
 
 
 def sample_web_output() -> str:
@@ -48,9 +48,11 @@ def sample_web_output() -> str:
             "score": 0.9412,
             "published_date": "2026-03-15",
             "content": (
-                "Các mô hình nền tảng trong năm 2026 chuyển dịch mạnh mẽ từ single-turn reasoning "
-                "sang agentic multi-step workflows. Doanh nghiệp tập trung tối ưu hóa chi phí token "
-                "và bảo vệ dữ liệu nội bộ bằng giải pháp Hybrid RAG kết hợp reranker cục bộ."
+                "Các mô hình nền tảng trong năm 2026 chuyển dịch "
+                "mạnh mẽ từ single-turn reasoning sang agentic "
+                "multi-step workflows. Doanh nghiệp tập trung "
+                "tối ưu hóa chi phí token và bảo vệ dữ liệu nội "
+                "bộ bằng giải pháp Hybrid RAG kết hợp reranker."
             ),
         },
         {
@@ -65,7 +67,7 @@ def sample_web_output() -> str:
         },
     ]
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TÌM KIẾM WEB ===\n"
         f'Truy vấn: "{query}"\n'
@@ -128,7 +130,7 @@ def sample_paper_output() -> str:
         ),
     ]
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TÌM KIẾM BÀI BÁO ===\n"
         f'Truy vấn: "{query}"\n'
@@ -170,9 +172,11 @@ def sample_knowledge_output() -> str:
             section="Chương III: Chế độ công tác phí > Điều 12. Định mức lưu trú",
             page=14,
             content=(
-                "Cán bộ nhân viên đi công tác tại các thành phố trực thuộc Trung ương được thanh toán "
-                "tiền phòng tối đa 1.200.000 VNĐ/đêm theo hóa đơn tài chính hợp lệ. Các khoản phụ cấp "
-                "lưu trú được chi trả 250.000 VNĐ/ngày theo phê duyệt kế hoạch công tác."
+                "Cán bộ nhân viên đi công tác tại các thành phố "
+                "trực thuộc Trung ương được thanh toán tiền phòng "
+                "tối đa 1.200.000 VNĐ/đêm theo hóa đơn tài chính "
+                "hợp lệ. Các khoản phụ cấp lưu trú được chi trả "
+                "250.000 VNĐ/ngày theo phê duyệt kế hoạch công tác."
             ),
             score=0.915,
             distance=0.1824,
@@ -183,9 +187,10 @@ def sample_knowledge_output() -> str:
             section="Mục 2. Hồ sơ tạm ứng và thanh toán công tác",
             page=5,
             content=(
-                "Hồ sơ đề nghị thanh toán công tác phí phải gửi về phòng Tài chính - Kế toán trong "
-                "vòng 07 ngày làm việc kể từ ngày kết thúc chuyến công tác, đính kèm vé máy bay/tàu xe "
-                "và bảng kê hành trình."
+                "Hồ sơ đề nghị thanh toán công tác phí phải gửi "
+                "về phòng Tài chính - Kế toán trong vòng 07 ngày "
+                "làm việc kể từ ngày kết thúc chuyến công tác, "
+                "đính kèm vé máy bay/tàu xe và bảng kê hành trình."
             ),
             score=0.864,
             distance=0.2215,
@@ -204,9 +209,11 @@ def sample_youtube_stats_output() -> str:
             "channelTitle": "Rick Astley",
             "publishedAt": "2009-10-25T06:57:33Z",
             "description": (
-                "The official video for 'Never Gonna Give You Up' by Rick Astley. "
-                "Taken from the album 'Whenever You Need Somebody' – deluxe 2CD and digital deluxe out now! "
-                "Stream Rick Astley here: https://rickastley.lnk.to/stream"
+                "The official video for 'Never Gonna Give You Up' "
+                "by Rick Astley. Taken from the album "
+                "'Whenever You Need Somebody' - deluxe 2CD and "
+                "digital deluxe out now! Stream Rick Astley here: "
+                "https://rickastley.lnk.to/stream"
             ),
         },
         "statistics": {
@@ -219,7 +226,7 @@ def sample_youtube_stats_output() -> str:
         },
     }
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== SỐ LIỆU VIDEO YOUTUBE ===\n"
         f"Thời điểm tra cứu: {now}"
@@ -244,8 +251,10 @@ def sample_youtube_search_output() -> str:
                 "channelTitle": "AI Engineering Hub",
                 "publishedAt": "2026-01-20T14:00:00Z",
                 "description": (
-                    "Video hướng dẫn từng bước thiết kế RAG agent chuyên nghiệp: từ chunking văn bản, "
-                    "hybrid search (BM25 + vector), cross-encoder rerank đến bảo vệ đầu ra."
+                    "Video hướng dẫn từng bước thiết kế RAG agent "
+                    "chuyên nghiệp: từ chunking văn bản, hybrid "
+                    "search (BM25 + vector), cross-encoder rerank "
+                    "đến bảo vệ đầu ra."
                 ),
             },
             "statistics": {
@@ -264,8 +273,10 @@ def sample_youtube_search_output() -> str:
                 "channelTitle": "DevOps & AI Vietnam",
                 "publishedAt": "2026-02-10T09:30:00Z",
                 "description": (
-                    "Phân tích so sánh chi tiết hiệu năng giữa bi-encoders và cross-encoders, "
-                    "kỹ thuật calibration khoảng cách cosine để quyết định khi nào cần hỏi lại người dùng."
+                    "Phân tích so sánh chi tiết hiệu năng giữa "
+                    "bi-encoders và cross-encoders, kỹ thuật "
+                    "calibration khoảng cách cosine để quyết định "
+                    "khi nào cần hỏi lại người dùng."
                 ),
             },
             "statistics": {
@@ -279,7 +290,7 @@ def sample_youtube_search_output() -> str:
         },
     ]
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TÌM KIẾM YOUTUBE ===\n"
         f'Truy vấn: "{query}"\n'
@@ -317,7 +328,8 @@ def print_section(title: str, content: str, tool_source: str) -> None:
     print("-" * 80)
     print("  [Quan sát sau khi qua guard wrap_observation (đưa vào Prompt)]:")
     print("-" * 80)
-    print(wrapped[:350] + ("\n... [còn lại đã trích xuất an toàn] ...\n" if len(wrapped) > 350 else ""))
+    tail = "\n... [còn lại đã trích xuất an toàn] ...\n" if len(wrapped) > 350 else ""
+    print(wrapped[:350] + tail)
     print("\n")
 
 
@@ -354,13 +366,25 @@ def main() -> None:
         )
 
     if args.all or args.tool == "knowledge":
-        print_section("3. Knowledge Base Search Output", sample_knowledge_output(), "Tai lieu noi bo")
+        print_section(
+            "3. Knowledge Base Search Output",
+            sample_knowledge_output(),
+            "Tai lieu noi bo",
+        )
 
     if args.all or args.tool == "youtube_stats":
-        print_section("4. YouTube Video Stats Output", sample_youtube_stats_output(), "YouTube Data API v3")
+        print_section(
+            "4. YouTube Video Stats Output",
+            sample_youtube_stats_output(),
+            "YouTube Data API v3",
+        )
 
     if args.all or args.tool == "youtube_search":
-        print_section("5. YouTube Search Output", sample_youtube_search_output(), "YouTube Data API v3")
+        print_section(
+            "5. YouTube Search Output",
+            sample_youtube_search_output(),
+            "YouTube Data API v3",
+        )
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ Hạn mức: 10.000 đơn vị/ngày miễn phí, `videos.list` tốn 1 đơn v�
 """
 
 import re
+from datetime import UTC
 from typing import Any
 
 import httpx
@@ -278,9 +279,9 @@ async def run_youtube_stats(payload: dict[str, Any], _ctx: CallContext) -> str:
             "hoac ID sai. Hay noi thang, dung suy doan noi dung."
         )
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== SỐ LIỆU VIDEO YOUTUBE ===\n"
         f"Thời điểm tra cứu: {now}"
@@ -368,9 +369,9 @@ async def run_youtube_search(payload: dict[str, Any], _ctx: CallContext) -> str:
     if not items:
         return f"Tim thay video nhung khong lay duoc so lieu cho: {query}."
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TÌM KIẾM YOUTUBE ===\n"
         f"Truy vấn: \"{query}\"\n"

@@ -7,6 +7,7 @@
 """
 
 from typing import Any
+
 import pytest
 
 from agents.domain.knowledge import RetrievedChunk
@@ -16,7 +17,8 @@ from tools.guard import wrap_observation
 from tools.knowledge_search import _dinh_dang as format_knowledge
 from tools.paper_search import Paper, _format_authors
 from tools.web_search import _parse_domain
-from tools.youtube import _dinh_dang as format_youtube, _parse_duration
+from tools.youtube import _dinh_dang as format_youtube
+from tools.youtube import _parse_duration
 
 CTX = CallContext(
     scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr"
@@ -31,6 +33,7 @@ class TestWebSearchOutput:
 
     async def test_web_search_output_structure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import httpx
+
         from tools import web_search
 
         class FakeClient:

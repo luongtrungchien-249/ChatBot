@@ -14,6 +14,7 @@ import asyncio
 import re
 from collections.abc import Coroutine
 from dataclasses import dataclass, replace
+from datetime import UTC
 from typing import Any
 
 import httpx
@@ -212,7 +213,11 @@ async def _from_arxiv(client: httpx.AsyncClient, query: str, n: int) -> list[Pap
                 url=_clean(ident.group(1)) if ident else None,
                 abstract=_clean(summary.group(1)) if summary else None,
                 source="arXiv",
-                authors=_format_authors([{"name": a} for a in authors_raw]) if authors_raw else None,
+                authors=(
+                    _format_authors([{"name": a} for a in authors_raw])
+                    if authors_raw
+                    else None
+                ),
                 venue="arXiv",
             )
         )
@@ -248,7 +253,11 @@ async def _from_semantic_scholar(client: httpx.AsyncClient, query: str, n: int) 
                 citations=p.get("citationCount"),
                 source="Semantic Scholar",
                 authors=_format_authors(raw_authors),
-                venue=_clean(venue_raw) if isinstance(venue_raw, str) and venue_raw.strip() else None,
+                venue=(
+                    _clean(venue_raw)
+                    if isinstance(venue_raw, str) and venue_raw.strip()
+                    else None
+                ),
             )
         )
     return papers
@@ -433,9 +442,9 @@ async def run_paper_search(
     if not papers:
         return f'Khong tim thay bai bao nao cho truy van "{query}".'
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Trang thai tung nguon: ✓ thanh cong, ✗ that bai.
     trang_thai = " | ".join(
         f"{n} {'✗' if n in failed else '✓'}" for n in names
