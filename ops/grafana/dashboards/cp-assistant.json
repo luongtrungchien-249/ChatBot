@@ -10,8 +10,8 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Ngân sách hôm nay",
-      "description": "Chốt chặn CỨNG, không phải alert. Chạm trần là bot từ chối trả lời tới hết ngày.",
+      "title": "Daily budget consumed (%)",
+      "description": "Recorded daily spend / positive configured budget. Provisional warning at 70%, critical at 90%; missing/invalid budget is No data. Unrecorded costs are not included.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -24,19 +24,15 @@
       },
       "targets": [
         {
-          "expr": "cp_budget_spent_usd",
-          "legendFormat": "đã tiêu",
+          "expr": "(cp_budget_spent_usd / cp_budget_limit_usd) and (cp_budget_limit_usd > 0)",
+          "legendFormat": "fraction consumed",
           "refId": "A"
-        },
-        {
-          "expr": "cp_budget_limit_usd",
-          "legendFormat": "trần",
-          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "currencyUSD",
+          "unit": "percentunit",
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -262,6 +258,173 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Worker wall-clock latency and queue wait (5m)",
+      "description": "Recent rolling p95; not the sum of parallel upstream durations.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "targets": [
+        {"expr": "cp_runtime_turn_latency_p95_ms", "legendFormat": "turn {{outcome}}", "refId": "A"},
+        {"expr": "cp_queue_wait_p95_ms", "legendFormat": "queue wait {{outcome}}", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Process heartbeat age",
+      "description": "Only measured ages are shown. Zalo is shown only when explicitly expected; missing observations are not zero. Provisional stale threshold: 120s.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+      "targets": [
+        {"expr": "cp_heartbeat_age_seconds{component=~\"worker|maintenance\"} or (cp_heartbeat_age_seconds{component=\"zalo\"} and on(instance,job,component) (cp_process_expected{component=\"zalo\"} == 1))", "legendFormat": "{{component}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Queue depth",
+      "description": "ARQ queue size includes jobs still in progress.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "targets": [
+        {"expr": "cp_queue_depth", "legendFormat": "{{queue}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Turn outcomes (rolling 5m)",
+      "description": "Gauge of unique trace outcomes, not a monotonic counter. Do not use rate().",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+      "targets": [
+        {"expr": "cp_runtime_turns", "legendFormat": "{{outcome}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Sent fallback ratio (rolling 5m)",
+      "description": "Only sent replies with measured fallback status; excludes silent retries and unknown historical rows.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "targets": [
+        {"expr": "cp_runtime_fallbacks / clamp_min(cp_runtime_measured_replies, 1)", "legendFormat": "fallback ratio", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Turn stop reasons (rolling 5m)",
+      "description": "Bounded, content-free reasons. Each trace retains its latest attempt, not a monotonic counter.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+      "targets": [
+        {"expr": "cp_runtime_turn_reason", "legendFormat": "{{reason}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "ReAct work (rolling 5m)",
+      "description": "Latest-attempt measurements only. ReAct counts do not include the separate poetry route.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
+      "targets": [
+        {"expr": "cp_runtime_react_iterations", "legendFormat": "model calls", "refId": "A"},
+        {"expr": "cp_runtime_tool_calls", "legendFormat": "tool calls", "refId": "B"},
+        {"expr": "cp_runtime_tool_errors", "legendFormat": "failed observations", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "RAG tool outcomes (rolling 5m)",
+      "description": "Counts tool attempts, including retries; not unique turns. Uncertain means candidates offered, not proof the final answer asked a question.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 54},
+      "targets": [
+        {"expr": "cp_rag_requests", "legendFormat": "{{outcome}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "RAG degradation and low confidence (5m)",
+      "description": "Stage counts overlap: use stage=any for a deduplicated degradation ratio. Low confidence is a retrieval signal, not a calibrated correctness score.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 54},
+      "targets": [
+        {"expr": "cp_rag_degraded_requests", "legendFormat": "degraded {{stage}}", "refId": "A"},
+        {"expr": "cp_rag_low_confidence_requests", "legendFormat": "low confidence", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "RAG tool latency p95 (rolling 5m)",
+      "description": "Wall-clock per knowledge-tool attempt, including widening search/compression; not a sum of parallel branch latencies.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 62},
+      "targets": [
+        {"expr": "cp_rag_latency_p95_ms", "legendFormat": "{{outcome}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms", "min": 0}, "overrides": []}
+    }
+    ,{
+      "id": 17,
+      "type": "timeseries",
+      "title": "Oldest original queue enqueue age",
+      "description": "Includes deferred and in-progress jobs. Unknown/incomplete samples are omitted, not zero. Check cp_queue_age_complete on gaps.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 70},
+      "targets": [
+        {"expr": "cp_queue_oldest_age_seconds", "legendFormat": "{{queue}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Recorded daily spend and budget (USD)",
+      "description": "Raw configured budget and recorded spend; the percentage panel controls provisional 70/90 percent warning colors. Costs missing from accounting are not zero.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 78},
+      "targets": [
+        {"expr": "cp_budget_spent_usd", "legendFormat": "recorded spend", "refId": "A"},
+        {"expr": "cp_budget_limit_usd", "legendFormat": "configured budget", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Zalo polling expectation",
+      "description": "Operator configuration, not heartbeat health: 0 is intentionally disabled, 1 is expected. Missing metric is unknown. Inspect heartbeat age/observation for an expected process.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 78},
+      "targets": [
+        {"expr": "cp_process_expected{component=\"zalo\"}", "legendFormat": "polling expected", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "mappings": [{"type": "value", "options": {"0": {"text": "Disabled", "color": "gray"}, "1": {"text": "Expected", "color": "blue"}}}]
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "1m",
@@ -290,5 +453,5 @@
   "timezone": "Asia/Ho_Chi_Minh",
   "title": "CP Assistant — chi phí, độ trễ, cache",
   "uid": "cp-assistant",
-  "version": 1
+  "version": 6
 }

@@ -9,13 +9,17 @@ Khong dung agents/, khong dung vong ReAct.
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
+from agents.domain.knowledge import RetrievalEvidence
+from agents.domain.telemetry import RagObservation
 from agents.ports.llm import CallContext, ToolCall
 from agents.ports.tool import ToolDefinition, ToolResult
 from agents.prompt.instructions import COMPRESS_TOOL_RESULT_INSTRUCTION
 from infra.logger import get_logger
+from infra.runtime_metrics import record_rag
+from knowledge.retrieve.service import RetrievalUnavailableError
 from llm.cost_meter import record_tool
 from llm.models import MODELS
 from llm.openai_client import llm
@@ -23,8 +27,9 @@ from llm.openai_client import llm
 from .guard import exceeds_tool_budget, wrap_observation
 from .knowledge_search import (
     KNOWLEDGE_SEARCH_DEFINITION,
+    KnowledgeToolOutput,
     is_knowledge_search_available,
-    run_knowledge_search,
+    run_observed_knowledge_search,
 )
 from .paper_search import PAPER_SEARCH_DEFINITION, run_paper_search
 from .web_search import WEB_SEARCH_DEFINITION, is_web_search_available, run_web_search
@@ -41,7 +46,7 @@ _log = get_logger()
 #: Nhan CA CallContext chu khong chi trace_id: cong cu tra cuu tai lieu can
 #: `ctx.scope` de loc theo nhom. Truyen ca ctx thay vi them tham so thu ba cho
 #: rieng mot cong cu — mot chu ky cho moi cong cu thi khong ai phai nho hai luat.
-Runner = Callable[[dict[str, Any], CallContext], Awaitable[str]]
+Runner = Callable[[dict[str, Any], CallContext], Awaitable[str | KnowledgeToolOutput]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +94,7 @@ _REGISTRY: tuple[Registration, ...] = (
     ),
     Registration(
         definition=KNOWLEDGE_SEARCH_DEFINITION,
-        run=run_knowledge_search,
+        run=run_observed_knowledge_search,
         source="Tai lieu noi bo",
         # Chua nap tai lieu nao thi khong khai — xem knowledge_search.py.
         available=is_knowledge_search_available,
@@ -162,11 +167,19 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
             latency_ms=await _ghi_so(call, ctx, started, ok=False),
         )
 
+    observation = RagObservation("error")
+    evidence: tuple[RetrievalEvidence, ...] | None = None
     try:
         _log.info("goi cong cu", trace_id=ctx.trace_id, tool=call.name, input=call.input)
-        raw = await _compress_if_too_long(
-            await registration.run(call.input, ctx), call.name, ctx
-        )
+        output = await registration.run(call.input, ctx)
+        if isinstance(output, KnowledgeToolOutput):
+            observation = output.observation
+            text = output.text
+            evidence = output.evidence
+        else:
+            text = output
+            observation = RagObservation("unknown")
+        raw = await _compress_if_too_long(text, call.name, ctx)
         latency_ms = await _ghi_so(call, ctx, started, ok=True)
         _log.info("cong cu tra ve", trace_id=ctx.trace_id, tool=call.name, latency_ms=latency_ms)
 
@@ -183,8 +196,17 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
             ),
             ok=True,
             latency_ms=latency_ms,
+            evidence=evidence,
         )
+    except asyncio.CancelledError:
+        observation = replace(observation, outcome="cancelled")
+        raise
     except Exception as error:
+        observation = replace(observation, outcome="error")
+        if isinstance(error, RetrievalUnavailableError):
+            observation = RagObservation(
+                "error", retrieval_degraded=True, rerank_degraded=error.rerank_degraded
+            )
         latency_ms = await _ghi_so(call, ctx, started, ok=False)
         _log.error(
             "cong cu loi",
@@ -203,6 +225,14 @@ async def _run_one(call: ToolCall, ctx: CallContext) -> ToolResult:
             ok=False,
             latency_ms=latency_ms,
         )
+    finally:
+        if call.name == KNOWLEDGE_SEARCH_DEFINITION.name:
+            await record_rag(
+                ctx.trace_id,
+                ctx.scope.platform,
+                observation,
+                int((time.monotonic() - started) * 1000),
+            )
 
 
 class ToolRegistry:

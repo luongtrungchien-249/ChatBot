@@ -30,6 +30,9 @@ const state = {
   steps: [],
   renaming: null,
   stream: null,
+  streamReady: false,
+  pendingMessageId: null,
+  seenReplies: new Set(),
   // Nguoi dung da tu cuon len de doc lai chua. Neu roi thi KHONG duoc keo man hinh
   // ve cuoi moi lan co su kien moi — do la cach nhanh nhat lam nguoi ta buc minh.
   pinned: true,
@@ -67,7 +70,10 @@ const api = {
       body: JSON.stringify({ threadId: id, text }),
     }).then(json),
   stop: (id) => fetch(`/api/threads/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
-  remove: (id) => fetch(`/api/threads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  remove: (id, allData = false) => fetch(
+    `/api/threads/${encodeURIComponent(id)}${allData ? '/data' : ''}`,
+    { method: 'DELETE' },
+  ),
   rename: (id, title) =>
     fetch(`/api/threads/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -341,9 +347,26 @@ function threadRow(thread) {
 
   const remove = iconButton('trash', 'Xoá cuộc trò chuyện', 'icon-btn thread-delete');
   remove.addEventListener('click', async () => {
-    await api.remove(thread.threadId);
-    if (thread.threadId === state.threadId) selectThread(newThreadId());
-    else await refreshThreads();
+    if (!window.confirm('Xoá lịch sử cuộc trò chuyện? Thông tin bạn đã bảo bot nhớ vẫn được giữ.')) return;
+    const allData = window.confirm(
+      'Bạn có muốn xoá CẢ thông tin bot đã nhớ trong cuộc trò chuyện này không?\n\n'
+      + 'OK: xoá toàn bộ dữ liệu. Cancel: chỉ xoá lịch sử.',
+    );
+    remove.disabled = true;
+    try {
+      const response = await api.remove(thread.threadId, allData);
+      if (response.status === 409) {
+        showError('Bot đang xử lý cuộc trò chuyện. Hãy dừng hoặc chờ bot xong rồi xoá lại.');
+        remove.disabled = false;
+        return;
+      }
+      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+      if (thread.threadId === state.threadId) selectThread(newThreadId());
+      else await refreshThreads();
+    } catch {
+      showError('Không xoá được cuộc trò chuyện. Dữ liệu vẫn được giữ nguyên trên giao diện.');
+      remove.disabled = false;
+    }
   });
 
   actions.append(rename, remove);
@@ -386,6 +409,10 @@ function threadFromHash() {
 
 async function selectThread(id, { pushHash = true } = {}) {
   state.threadId = id;
+  state.streamReady = false;
+  state.pendingMessageId = null;
+  state.seenReplies.clear();
+  if (state.stream !== null) state.stream.close();
   if (pushHash && threadFromHash() !== id) location.hash = `t=${encodeURIComponent(id)}`;
   state.steps = [];
   setWaiting(false);
@@ -398,10 +425,23 @@ async function selectThread(id, { pushHash = true } = {}) {
   // Lich su doc tu Postgres, KHONG phai localStorage — tai lai trang hay doi may
   // van con day.
   try {
-    renderMessages(await api.messages(id));
+    const claimed = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: 'POST' });
+    if (!claimed.ok) throw new Error('Không có quyền truy cập hội thoại.');
+    if (state.threadId !== id) return;
+    const messages = await api.messages(id);
+    if (state.threadId !== id) return;
+    for (const message of messages) {
+      if (message.fromBot && message.replyTo) state.seenReplies.add(message.replyTo);
+    }
+    renderMessages(messages);
   } catch {
+    if (state.threadId !== id) return;
     renderMessages([]);
+    if (state.stream !== null) state.stream.close();
+    showError('Không mở được hội thoại.');
+    return;
   }
+  if (state.threadId !== id) return;
   openStream(id);
 }
 
@@ -412,14 +452,22 @@ function setStatus(kind, text) {
 
 function openStream(threadId) {
   if (state.stream !== null) state.stream.close();
+  state.streamReady = false;
   const source = new EventSource(`/api/stream/${encodeURIComponent(threadId)}`);
 
-  source.onopen = () => setStatus('', 'Đã kết nối');
+  source.onopen = () => {
+    if (state.stream === source) setStatus('', 'Đã kết nối');
+  };
   // EventSource tu ket noi lai, nen day khong phai loi vinh vien — nhung nguoi dung
   // phai thay, vi trong luc mat ket noi thi cau tra loi se khong bao gio hien ra.
-  source.onerror = () => setStatus('error', 'Mất kết nối, đang thử lại…');
+  source.onerror = () => {
+    if (state.stream !== source) return;
+    state.streamReady = false;
+    setStatus('error', 'Mất kết nối, đang thử lại…');
+  };
 
   source.onmessage = (ev) => {
+    if (state.stream !== source || state.threadId !== threadId) return;
     let event;
     try {
       event = JSON.parse(ev.data);
@@ -433,6 +481,11 @@ function openStream(threadId) {
 
 function handleEvent(event) {
   switch (event.type) {
+    case 'ready':
+      state.streamReady = true;
+      el.send.disabled = state.waiting || el.draft.value.trim() === '';
+      recoverPendingReply();
+      break;
     case 'thought':
       state.steps.push({ kind: 'thought', text: event.text, ok: true });
       renderSteps();
@@ -455,8 +508,13 @@ function handleEvent(event) {
       renderSteps();
       break;
     case 'final':
+      if (event.reply_to && state.seenReplies.has(event.reply_to)) break;
+      if (event.reply_to) state.seenReplies.add(event.reply_to);
       appendMessage(event.text, true);
-      setWaiting(false);
+      if (state.pendingMessageId && event.reply_to === state.pendingMessageId) {
+        state.pendingMessageId = null;
+        setWaiting(false);
+      }
       // Giu lai dau vet de nguoi dung con xem bot da tra cuu gi, nhung gap lai:
       // no da xong viec, khong con la thu dang theo doi.
       collapseTrace();
@@ -470,6 +528,28 @@ function handleEvent(event) {
       break;
     default:
       break; // 'typing' va cac su kien sau nay: khong can lam gi.
+  }
+}
+
+async function recoverPendingReply() {
+  const threadId = state.threadId;
+  const pending = state.pendingMessageId;
+  if (!state.waiting || !pending) return;
+  try {
+    const messages = await api.messages(threadId);
+    if (state.threadId !== threadId || state.pendingMessageId !== pending) return;
+    if (!messages.some((message) => message.fromBot && message.replyTo === pending)) return;
+    // The final may predate the short Redis replay TTL. PostgreSQL remains history's source.
+    for (const message of messages) {
+      if (message.fromBot && message.replyTo) state.seenReplies.add(message.replyTo);
+    }
+    renderMessages(messages);
+    state.pendingMessageId = null;
+    setWaiting(false);
+    collapseTrace();
+    refreshThreads();
+  } catch {
+    // Leave the pending request visible; EventSource will retry its connection.
   }
 }
 
@@ -525,7 +605,8 @@ function autoGrow() {
 }
 
 async function submit(text) {
-  if (text === '' || state.waiting) return;
+  if (text === '' || state.waiting || !state.streamReady) return;
+  const threadId = state.threadId;
 
   el.draft.value = '';
   autoGrow();
@@ -540,8 +621,16 @@ async function submit(text) {
   setWaiting(true);
 
   try {
-    await api.send(state.threadId, text);
+    const accepted = await api.send(threadId, text);
+    if (state.threadId !== threadId) return;
+    state.pendingMessageId = accepted.messageId;
+    // A fast worker may publish before the POST acknowledgement reaches us.
+    if (state.seenReplies.has(accepted.messageId)) {
+      state.pendingMessageId = null;
+      setWaiting(false);
+    }
   } catch (err) {
+    if (state.threadId !== threadId) return;
     showError(String(err));
     setWaiting(false);
   }
@@ -565,7 +654,7 @@ el.suggestions.replaceChildren(
 );
 
 el.draft.addEventListener('input', () => {
-  el.send.disabled = el.draft.value.trim() === '';
+  el.send.disabled = !state.streamReady || el.draft.value.trim() === '';
   autoGrow();
 });
 

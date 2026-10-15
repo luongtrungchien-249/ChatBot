@@ -17,15 +17,18 @@ from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from adapters.web.routes import WEB_ROOT, require_localhost, router
+from adapters.web.auth import require_identity
+from adapters.web.routes import WEB_ROOT, configure_delete_handler, router
 from config import get_settings
 from infra.db import close_db
 from infra.http import close_http
 from infra.logger import configure_logging, get_logger
 from infra.queue import close_queue
 from infra.redis_client import close_redis
+from main.thread_admin import delete_thread_data
 
 configure_logging()
+configure_delete_handler(delete_thread_data)
 _log = get_logger()
 
 templates = Jinja2Templates(directory=str(WEB_ROOT / "templates"))
@@ -63,7 +66,7 @@ async def log_requests(request: Request, call_next: object) -> Response:
 @app.get("/")
 async def index(request: Request) -> Response:
     """Trang chat. Cung chinh sach truy cap nhu cac route /api (D17: chi localhost)."""
-    require_localhost(request)
+    await require_identity(request)
     # Ten bot lay tu config chu khong hardcode trong template: no da doi mot lan,
     # va lan sau doi thi tieu de trang khong duoc phep noi mot cai ten khac.
     return templates.TemplateResponse(

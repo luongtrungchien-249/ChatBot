@@ -12,14 +12,29 @@ from typing import Any
 from agents.domain.thread import ThreadScope
 from infra.logger import get_logger
 from infra.redis_client import aw, get_redis
+from infra.thread_lifecycle import read_web_generation
 
-from .normalize import WEB_MAX_MESSAGE_CHARS, FinalEvent, TypingEvent, WebEvent, web_channel_key
+from .normalize import (
+    WEB_MAX_MESSAGE_CHARS,
+    FinalEvent,
+    TypingEvent,
+    WebEvent,
+    web_channel_key,
+    web_final_key,
+)
 
 _log = get_logger()
 
 
 async def _publish(thread_id: str, event: WebEvent | Any) -> None:
     payload = json.dumps(asdict(event), ensure_ascii=False)
+    if isinstance(event, FinalEvent):
+        # Cache before publish atomically so reconnect can recover the final.
+        pipe = get_redis().pipeline(transaction=True)
+        pipe.set(web_final_key(thread_id), payload, ex=300)
+        pipe.publish(web_channel_key(thread_id), payload)
+        await pipe.execute()
+        return
     await aw(get_redis().publish(web_channel_key(thread_id), payload))
 
 
@@ -54,7 +69,10 @@ class WebChannel:
         await _publish(scope.thread_id, TypingEvent())
 
     async def send(self, scope: ThreadScope, text: str, reply_to: str | None = None) -> None:
-        await _publish(scope.thread_id, FinalEvent(text=text))
+        generation = await read_web_generation(scope)
+        await _publish(
+            scope.thread_id, FinalEvent(text=text, reply_to=reply_to, generation=generation)
+        )
 
 
 web_channel = WebChannel()

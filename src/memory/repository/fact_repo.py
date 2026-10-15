@@ -1,4 +1,4 @@
-"""L3 — CHO DUY NHAT trong codebase cham bang `memory_fact`.
+"""L3 runtime repository; vector recovery lives in sibling embedding_rebuild.py.
 
 `ops/guard_sql.py` cuong che dieu do bang AST: bat ky chuoi nao chua "memory_fact"
 o ngoai `memory/repository/` deu lam CI do. Luat khong phai de cho dep — no la mot
@@ -9,20 +9,23 @@ khong co ham nao "tien the" bo qua. Doc lai file nay ma thay mot cau SQL thieu h
 dieu kien do thi do la mot lo ro ri.
 """
 
+import json
+import math
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
+from agents.domain.errors import UpstreamError
 from agents.domain.thread import ThreadScope
-from agents.ports.memory import Fact, FactSource, NewFact
-from infra.db import execute, fetch
+from agents.ports.memory import Fact, FactSource, MemoryUnavailableError, NewFact
+from infra.db import execute, fetch, transaction
 from infra.logger import get_logger
-from llm.embedder import embed_query, get_embedder
+from llm.embedder import EmbeddingIdentity, embed_query, embedding_identity, get_embedder
 
 from ..dedupe import (
     FORGET_MAX_CANDIDATES,
     FORGET_THRESHOLD,
     Insert,
-    Replace,
     Skip,
     cosine,
     decide,
@@ -37,6 +40,134 @@ _log = get_logger()
 #: luc khoi dong. Xuat mot hang so la cach giai dung: mot noi dinh nghia, cho khac
 #: import. Khoet mot ngoai le trong guard thi luat mat tac dung tu lan sau.
 FACT_TABLE = "memory_fact"
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryEmbeddingProvenanceStatus:
+    total_facts: int
+    unknown_facts: int
+    mismatched_facts: int
+    identity: EmbeddingIdentity
+
+    @property
+    def ready(self) -> bool:
+        return self.unknown_facts == self.mismatched_facts == 0
+
+
+class MemoryEmbeddingProvenanceError(MemoryUnavailableError):
+    def __init__(self, status: MemoryEmbeddingProvenanceStatus) -> None:
+        super().__init__(
+            "Embedding ky uc chua duoc xac minh hoac khong khop. "
+            "Van co the liet ke/audit/xoa bang ID; khong so sanh vector chua biet nguon.",
+            UpstreamError(service="embed", status=409),
+        )
+        self.status = status
+
+def _identity_args(identity: EmbeddingIdentity) -> tuple[str, str, int, str]:
+    return identity.provider, identity.model, identity.dimensions, identity.revision
+
+
+def _status(row: Any, identity: EmbeddingIdentity) -> MemoryEmbeddingProvenanceStatus:
+    return MemoryEmbeddingProvenanceStatus(
+        int(row["total_facts"]), int(row["unknown_facts"]), int(row["mismatched_facts"]), identity
+    )
+
+
+async def inspect_fact_embedding_provenance(
+    scope: ThreadScope, subject_ids: list[str] | None = None,
+    *, identity: EmbeddingIdentity | None = None,
+) -> MemoryEmbeddingProvenanceStatus:
+    """Scoped active metadata only; no content, API calls, writes, or backfill."""
+    identity = identity or embedding_identity()
+    rows = await fetch(
+        """SELECT count(*) AS total_facts,
+                  count(*) FILTER (WHERE embedding_provider IS NULL) AS unknown_facts,
+                  count(*) FILTER (WHERE embedding_provider IS NOT NULL AND
+                    (embedding_provider,embedding_model,embedding_dim,embedding_revision)
+                    IS DISTINCT FROM ($4::text,$5::text,$6::int,$7::text)) AS mismatched_facts
+             FROM memory_fact
+            WHERE platform=$1 AND thread_id=$2 AND revoked_at IS NULL
+              AND ($3::text[] IS NULL OR subject_id=ANY($3::text[]))""",
+        scope.platform, scope.thread_id, subject_ids, *_identity_args(identity),
+    )
+    return _status(rows[0], identity)
+
+
+async def _ready_identity(scope: ThreadScope, subjects: list[str]) -> EmbeddingIdentity:
+    identity = embedding_identity()
+    status = await inspect_fact_embedding_provenance(scope, subjects, identity=identity)
+    if not status.ready:
+        raise MemoryEmbeddingProvenanceError(status)
+    return identity
+
+
+def _assert_compatible(rows: list[Any], identity: EmbeddingIdentity) -> None:
+    unknown = mismatched = 0
+    columns = ("embedding_provider", "embedding_model", "embedding_dim", "embedding_revision")
+    for row in rows:
+        values = tuple(row[column] for column in columns)
+        if any(value is None for value in values):
+            unknown += 1
+        elif values != _identity_args(identity):
+            mismatched += 1
+    if unknown or mismatched:
+        raise MemoryEmbeddingProvenanceError(
+            MemoryEmbeddingProvenanceStatus(len(rows), unknown, mismatched, identity)
+        )
+
+
+def _validate_vector(vector: list[float], identity: EmbeddingIdentity) -> None:
+    if len(vector) != identity.dimensions or any(
+        type(value) not in (int, float) or not math.isfinite(value) for value in vector
+    ):
+        raise ValueError("Fact embedding does not match its declared identity")
+
+
+async def _insert_fact(
+    connection: Any, scope: ThreadScope, fact: NewFact, vector: list[float],
+    identity: EmbeddingIdentity,
+) -> None:
+    await connection.execute(
+        """INSERT INTO memory_fact
+             (platform,thread_id,subject_id,content,embedding,source,confidence,created_by,
+              embedding_provider,embedding_model,embedding_dim,embedding_revision)
+           VALUES ($1,$2,$3,$4,$5::vector,$6,$7,$8,$9,$10,$11,$12)""",
+        scope.platform, scope.thread_id, fact.subject_id, fact.content, _to_vector(vector),
+        fact.source, fact.confidence, fact.created_by, *_identity_args(identity),
+    )
+
+
+async def _lock_subject(connection: Any, scope: ThreadScope, subject_id: str) -> None:
+    key = json.dumps(["memory-subject", scope.platform, scope.thread_id, subject_id])
+    await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key)
+
+
+_ACTIVE_SUBJECT_SQL = """SELECT id, content, embedding, embedding_provider, embedding_model,
+                                embedding_dim, embedding_revision
+                           FROM memory_fact
+                          WHERE platform=$1 AND thread_id=$2 AND subject_id=$3
+                            AND revoked_at IS NULL ORDER BY id FOR UPDATE"""
+
+
+async def count_for_operations() -> int:
+    """Tong so fact cho baseline van hanh; khong doc noi dung hay dinh danh.
+
+    Day la ngoai le hep cho bao cao toan he thong. Moi API nghiep vu van bat buoc
+    nhan ``ThreadScope``; ham nay nam trong repository de SQL cua bang fact khong
+    ro ra tang van hanh.
+    """
+    rows = await fetch("SELECT count(*) AS total FROM memory_fact")
+    return int(rows[0]["total"]) if rows else 0
+
+
+async def hard_delete_scope(connection: Any, scope: ThreadScope) -> int:
+    """Xoa vinh vien moi fact cua DUNG mot thread trong transaction cua caller."""
+    status: str = await connection.execute(
+        "DELETE FROM memory_fact WHERE platform = $1 AND thread_id = $2",
+        scope.platform,
+        scope.thread_id,
+    )
+    return int(status.rsplit(" ", 1)[-1])
 
 #: pgvector nhan vector duoi dang chuoi '[a,b,c]'.
 def _to_vector(values: list[float]) -> str:
@@ -95,23 +226,47 @@ async def search_facts_for(
             collected.extend(await list_facts(scope, subject))
         return collected
 
+    if k < 1:
+        raise ValueError("k must be positive")
+
     # Qua cache: duong nay chay o MOI tin nhan, va RAG embed DUNG chuoi nay mot lan
     # nua trong cung luot. Cache chung bo hang mot vong mang khoi duong phan hoi.
+    identity = await _ready_identity(scope, subject_ids)
     vector = await embed_query(query)
+    _validate_vector(vector, identity)
+    if embedding_identity() != identity:
+        raise ValueError("Embedding configuration changed during memory retrieval")
     rows = await fetch(
-        """SELECT id, subject_id, content, source, confidence, created_at
-             FROM memory_fact
-            WHERE platform = $1 AND thread_id = $2 AND subject_id = ANY($3::text[])
-              AND revoked_at IS NULL
-            ORDER BY embedding <=> $4::vector
-            LIMIT $5""",
+        """WITH visible_facts AS MATERIALIZED (
+                SELECT * FROM memory_fact
+                 WHERE platform=$1 AND thread_id=$2 AND subject_id=ANY($3::text[])
+                   AND revoked_at IS NULL
+            ), provenance AS (
+                SELECT count(*) AS total_facts,
+                       count(*) FILTER (WHERE embedding_provider IS NULL) AS unknown_facts,
+                       count(*) FILTER (WHERE embedding_provider IS NOT NULL AND
+                         (embedding_provider,embedding_model,embedding_dim,embedding_revision)
+                         IS DISTINCT FROM ($6::text,$7::text,$8::int,$9::text)) AS mismatched_facts
+                  FROM visible_facts
+            )
+            SELECT hits.*,provenance.* FROM provenance LEFT JOIN LATERAL (
+                SELECT id,subject_id,content,source,confidence,created_at
+                  FROM visible_facts
+                 WHERE (embedding_provider,embedding_model,embedding_dim,embedding_revision)
+                       = ($6::text,$7::text,$8::int,$9::text)
+                 ORDER BY embedding <=> $4::vector LIMIT $5
+            ) hits ON true""",
         scope.platform,
         scope.thread_id,
         subject_ids,
         _to_vector(vector),
         k,
+        *_identity_args(identity),
     )
-    facts = [_to_fact(r) for r in rows]
+    status = _status(rows[0], identity)
+    if not status.ready:
+        raise MemoryEmbeddingProvenanceError(status)
+    facts = [_to_fact(r) for r in rows if r["id"] is not None]
 
     if facts:
         # last_used_at cho biet fact nao that su duoc dung. Khong co cot nay thi
@@ -127,58 +282,63 @@ async def search_facts_for(
 
 
 async def remember(scope: ThreadScope, fact: NewFact) -> None:
-    """Ghi mot fact moi, sau khi kiem trung va mau thuan.
-
-    Ba ket cuc: chen moi, bo qua vi trung y, hoac revoke cai cu roi chen cai moi.
-    Xem memory/dedupe.py.
-    """
-    vector = (await get_embedder().embed([fact.content]))[0]
-
-    existing = await fetch(
-        """SELECT id, content, embedding
-             FROM memory_fact
-            WHERE platform = $1 AND thread_id = $2 AND subject_id = $3
-              AND revoked_at IS NULL""",
-        scope.platform,
-        scope.thread_id,
-        fact.subject_id,
-    )
-    decision = decide(
-        fact.content,
-        vector,
-        [(str(r["id"]), r["content"], _parse_vector(r["embedding"])) for r in existing],
-    )
-
-    log = _log.bind(thread_id=scope.thread_id, subject_id=fact.subject_id)
-
-    if isinstance(decision, Skip):
-        log.info("fact trung y, bo qua", existing_id=decision.existing_id, sim=decision.similarity)
-        return
-
-    if isinstance(decision, Replace):
-        log.info(
-            "fact mau thuan voi ban cu, thay the",
-            existing_id=decision.existing_id,
-            sim=decision.similarity,
+    """Insert or suppress exact text; never infer a destructive semantic update."""
+    identity = await _ready_identity(scope, [fact.subject_id])
+    vectors = await get_embedder().embed([fact.content])
+    if len(vectors) != 1:
+        raise ValueError("Expected one fact embedding")
+    vector = vectors[0]
+    _validate_vector(vector, identity)
+    if embedding_identity() != identity:
+        raise ValueError("Embedding configuration changed during memory write")
+    async with transaction() as connection:
+        await _lock_subject(connection, scope, fact.subject_id)
+        existing = await connection.fetch(
+            _ACTIVE_SUBJECT_SQL, scope.platform, scope.thread_id, fact.subject_id,
         )
-        await _revoke(scope, [decision.existing_id], revoked_by=fact.created_by)
+        _assert_compatible(existing, identity)
+        decision = decide(fact.content, vector, [
+            (str(row["id"]), row["content"], _parse_vector(row["embedding"])) for row in existing
+        ])
+        if isinstance(decision, Skip):
+            _log.info("fact trung chu, bo qua", existing_id=decision.existing_id)
+            return
+        assert isinstance(decision, Insert)
+        await _insert_fact(connection, scope, fact, vector, identity)
+    _log.info("da ghi fact", source=fact.source)
 
-    assert isinstance(decision, Insert | Replace)
-    await execute(
-        """INSERT INTO memory_fact
-             (platform, thread_id, subject_id, content, embedding,
-              source, confidence, created_by)
-           VALUES ($1,$2,$3,$4,$5::vector,$6,$7,$8)""",
-        scope.platform,
-        scope.thread_id,
-        fact.subject_id,
-        fact.content,
-        _to_vector(vector),
-        fact.source,
-        fact.confidence,
-        fact.created_by,
-    )
-    log.info("da ghi fact", source=fact.source)
+
+async def replace_fact(scope: ThreadScope, fact: NewFact, existing_id: str) -> None:
+    """Explicit exact-ID update, requiring the same scope/subject and atomic writes.
+
+    This admin/service API is intentionally not inferred by remember() or exposed
+    as a new UI command. The caller must explicitly authorize the replacement.
+    """
+    if not existing_id.isdigit() or int(existing_id) < 1 or fact.source != "explicit":
+        raise ValueError("Explicit replacement requires a positive fact ID and explicit source")
+    identity = await _ready_identity(scope, [fact.subject_id])
+    vectors = await get_embedder().embed([fact.content])
+    if len(vectors) != 1:
+        raise ValueError("Expected one fact embedding")
+    vector = vectors[0]
+    _validate_vector(vector, identity)
+    if embedding_identity() != identity:
+        raise ValueError("Embedding configuration changed during memory update")
+    async with transaction() as connection:
+        await _lock_subject(connection, scope, fact.subject_id)
+        rows = await connection.fetch(
+            _ACTIVE_SUBJECT_SQL, scope.platform, scope.thread_id, fact.subject_id,
+        )
+        _assert_compatible(rows, identity)
+        if not any(int(row["id"]) == int(existing_id) for row in rows):
+            raise ValueError("Active replacement target not found in this scope and subject")
+        await connection.execute(
+            """UPDATE memory_fact SET revoked_at=now(), revoked_by=$5
+                WHERE platform=$1 AND thread_id=$2 AND subject_id=$3 AND id=$4
+                  AND revoked_at IS NULL""",
+            scope.platform, scope.thread_id, fact.subject_id, int(existing_id), fact.created_by,
+        )
+        await _insert_fact(connection, scope, fact, vector, identity)
 
 
 async def match_for_forget(scope: ThreadScope, subject_id: str, pattern: str) -> list[Fact]:
@@ -187,9 +347,10 @@ async def match_for_forget(scope: ThreadScope, subject_id: str, pattern: str) ->
     Khong co buoc xac nhan thi mot lan go nham la mat sach, ma soft delete lai khong
     co lenh khoi phuc (ARCHITECTURE.md section 6.2).
     """
-    vector = await embed_query(pattern)
+    identity = embedding_identity()
     rows = await fetch(
-        """SELECT id, subject_id, content, source, confidence, created_at, embedding
+        """SELECT id, subject_id, content, source, confidence, created_at, embedding,
+                  embedding_provider,embedding_model,embedding_dim,embedding_revision
              FROM memory_fact
             WHERE platform = $1 AND thread_id = $2 AND subject_id = $3
               AND revoked_at IS NULL""",
@@ -197,6 +358,11 @@ async def match_for_forget(scope: ThreadScope, subject_id: str, pattern: str) ->
         scope.thread_id,
         subject_id,
     )
+    _assert_compatible(rows, identity)
+    vector = await embed_query(pattern)
+    _validate_vector(vector, identity)
+    if embedding_identity() != identity:
+        raise ValueError("Embedding configuration changed during memory forget matching")
 
     scored = [
         (cosine(vector, _parse_vector(r["embedding"])), _to_fact(r))

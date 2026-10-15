@@ -20,7 +20,7 @@ Cau tra loi kieu "khong tim thay trong tai lieu" khi kho thuc su khong co: khong
 nao de kiem, va do la hanh vi DUNG. Tra ve None, de runner bo ra khoi trung binh.
 """
 
-from ._cham import doc_phan_quyet, goi_cham, la_thoai_thac
+from ._cham import doc_phan_quyet, goi_cham
 
 HUONG_DAN = """\
 Nhiệm vụ: kiểm tra từng khẳng định trong CÂU TRẢ LỜI có căn cứ trong TÀI LIỆU không.
@@ -53,8 +53,8 @@ nói điều đó bằng tiếng Anh, và ngược lại.
 
 async def judge_claim_faithfulness(answer: str, context: str, trace_id: str) -> float | None:
     """0.0 - 1.0. None khi cau tra loi la mot loi tu choi, hoac khi khong cham duoc."""
-    if la_thoai_thac(answer):
-        return None
+    # Applicability belongs to the structured final-answer judgment in the
+    # runner. A refusal phrase can coexist with unsupported substantive claims.
     raw = await goi_cham(
         system=HUONG_DAN,
         input=f"TÀI LIỆU:\n{context}\n\nCÂU TRẢ LỜI:\n{answer}",

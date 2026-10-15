@@ -8,6 +8,7 @@ plan noi la "bien so anh huong chat luong nhieu nhat".
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from infra.logger import get_logger
 
@@ -136,19 +137,51 @@ def _trang_pdf(path: Path) -> list[str]:
 
 def _from_docx(path: Path) -> str:
     import docx
+    from docx.table import Table
 
     document = docx.Document(str(path))
     lines: list[str] = []
-    for paragraph in document.paragraphs:
-        text = paragraph.text.strip()
+    # paragraphs excludes tables. iter_inner_content preserves paragraph/table
+    # order, so conditions and values in a table retain their surrounding section.
+    for block in document.iter_inner_content():
+        if isinstance(block, Table):
+            table_text = _docx_table_text(block)
+            if table_text:
+                lines.append(table_text)
+            continue
+        text = block.text.strip()
         if not text:
             continue
         # Tieu de cua Word ('Heading 1'...) duoc doi thanh markdown de buoc chunk
         # nhan ra chung bang DUNG mot luat, khong phai hai.
-        style = (paragraph.style.name or "") if paragraph.style else ""
+        style = (block.style.name or "") if block.style else ""
         if style.startswith("Heading"):
             level = "".join(c for c in style if c.isdigit()) or "1"
             lines.append(f"{'#' * min(int(level), 6)} {text}")
         else:
             lines.append(text)
     return "\n\n".join(lines)
+
+
+def _docx_table_text(table: Any) -> str:
+    from docx.table import Table
+
+    rows: list[str] = []
+    for row in table.rows:
+        cells: list[str] = []
+        seen: set[Any] = set()
+        for cell in row.cells:
+            # Word repeats the same XML cell for a horizontal merge. Retain its
+            # column placeholder while emitting the value only once in this row.
+            if cell._tc in seen:
+                cells.append("")
+                continue
+            seen.add(cell._tc)
+            blocks = [
+                _docx_table_text(block) if isinstance(block, Table) else block.text.strip()
+                for block in cell.iter_inner_content()
+            ]
+            cells.append(" ; ".join(text.replace("\n", " ; ") for text in blocks if text))
+        if any(cells):
+            rows.append(" | ".join(cells))
+    return "\n".join(rows)

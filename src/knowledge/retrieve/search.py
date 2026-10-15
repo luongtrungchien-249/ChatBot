@@ -29,7 +29,12 @@ from typing import Any
 from agents.domain.thread import ThreadScope, scope_key
 from infra.db import fetch
 from infra.logger import get_logger
-from llm.embedder import embed_query
+from knowledge.provenance import (
+    KnowledgeProvenanceError,
+    inspect_knowledge_provenance,
+    status_from_row,
+)
+from llm.embedder import EmbeddingIdentity, embed_query, embedding_identity
 
 _log = get_logger()
 
@@ -51,6 +56,10 @@ class ChunkRow:
     #: duong do khong tinh khoang cach, va no khop bang TU nen da co tin hieu
     #: rieng khong can den thuoc do nay.
     distance: float | None = None
+    doc_id: str | None = None
+    doc_version: int | None = None
+    doc_scope: str | None = None
+    is_latest: bool | None = None
 
 
 def _to_row(row: Any, distance: float | None = None) -> ChunkRow:
@@ -61,7 +70,58 @@ def _to_row(row: Any, distance: float | None = None) -> ChunkRow:
         section=row["section"],
         page=row["page"],
         content=row["content"],
+        doc_id=str(row["doc_id"]),
+        doc_version=int(row["doc_version"]),
+        doc_scope=row["doc_scope"],
+        is_latest=bool(row["is_latest"]),
     )
+
+
+async def _ready_identity(scope: ThreadScope) -> EmbeddingIdentity:
+    identity = embedding_identity()
+    status = await inspect_knowledge_provenance(scope, identity=identity)
+    if not status.ready:
+        raise KnowledgeProvenanceError(status)
+    return identity
+
+
+def _provenance_cte(identity_arg: int) -> str:
+    """Check the same SQL snapshot used for candidates, including empty results.
+
+    Preflight avoids paid embedding on unready corpora. This second check prevents
+    a concurrent ingestion/attestation from silently hiding incompatible documents.
+    Parameter positions are internal constants; no user text is interpolated.
+    """
+    provider, model, dim, revision = (f"${identity_arg + i}" for i in range(4))
+    return f"""WITH visible_documents AS MATERIALIZED (
+                  SELECT d.* FROM kb_document d
+                   WHERE d.la_ban_moi_nhat AND d.pham_vi IN ('chung', $3)
+                     AND EXISTS (SELECT 1 FROM kb_chunk c WHERE c.doc_id = d.id)
+              ), provenance AS (
+                  SELECT count(*) AS total_documents,
+                         count(*) FILTER (WHERE embedding_provider IS NULL) AS unknown_documents,
+                         count(*) FILTER (WHERE embedding_provider IS NOT NULL AND
+                           (embedding_provider, embedding_model, embedding_dim, embedding_revision)
+                           IS DISTINCT FROM ({provider}::text,{model}::text,{dim}::int,
+                                             {revision}::text)) AS mismatched_documents
+                    FROM visible_documents
+              )"""
+
+
+def _checked_rows(rows: list[Any], identity: EmbeddingIdentity) -> list[ChunkRow]:
+    if not rows:
+        raise RuntimeError("Missing retrieval readiness row")
+    status = status_from_row(rows[0], identity)
+    if not status.ready:
+        raise KnowledgeProvenanceError(status)
+    return [
+        _to_row(row, float(row["distance"]) if row["distance"] is not None else None)
+        for row in rows if row["id"] is not None
+    ]
+
+
+def _identity_args(identity: EmbeddingIdentity) -> tuple[str, str, int, str]:
+    return identity.provider, identity.model, identity.dimensions, identity.revision
 
 
 async def vector_search(
@@ -72,19 +132,27 @@ async def vector_search(
     Index HNSW o migration 0004 phuc vu dung phep toan nay. Doi sang `<->` hay `<#>`
     la index thanh vo dung va truy van tut ve quet tuan tu — im lang, chi cham dan.
     """
+    identity = await _ready_identity(scope)
     vector = await embed_query(query)
+    if embedding_identity() != identity:
+        raise RuntimeError("Embedding configuration changed during retrieval")
     rows = await fetch(
-        """SELECT c.id, c.section, c.page, c.content, d.title,
-                  (c.embedding <=> $1::vector) AS distance
-             FROM kb_chunk c JOIN kb_document d ON d.id = c.doc_id
-            WHERE d.la_ban_moi_nhat AND d.pham_vi IN ('chung', $3)
-            ORDER BY c.embedding <=> $1::vector
-            LIMIT $2""",
+        _provenance_cte(4) + """
+            SELECT hits.*, provenance.* FROM provenance LEFT JOIN LATERAL (
+                SELECT c.id, c.section, c.page, c.content, d.title,
+                       d.id AS doc_id, d.version AS doc_version, d.pham_vi AS doc_scope,
+                       d.la_ban_moi_nhat AS is_latest, (c.embedding <=> $1::vector) AS distance
+                  FROM kb_chunk c JOIN visible_documents d ON d.id = c.doc_id
+                 WHERE (d.embedding_provider,d.embedding_model,d.embedding_dim,d.embedding_revision)
+                       = ($4::text,$5::text,$6::int,$7::text)
+                 ORDER BY c.embedding <=> $1::vector LIMIT $2
+            ) hits ON true""",
         "[" + ",".join(f"{v:.7f}" for v in vector) + "]",
         limit,
         scope_key(scope),
+        *_identity_args(identity),
     )
-    return [_to_row(r, float(r["distance"])) for r in rows]
+    return _checked_rows(rows, identity)
 
 
 async def lexical_search(
@@ -116,30 +184,36 @@ async def lexical_search(
     chinh xac, va im lang phan con lai. "Duong lexical tra ve 0" khong phai loi; do
     la no dang lam dung viec.
     """
-    # Vector cua cau hoi, CHI de tinh khoang cach cho cac dong tim duoc o day.
-    #
-    # Khong ton them mot lan goi API: `embed_query` cache theo sha256 va `vector_search`
-    # chay song song da nap no roi.
-    #
-    # Vi sao can: cho goi dung khoang cach ngu nghia lam cua loc khi reranker la ban
-    # du phong. Truoc day dong den tu duong lexical khong co khoang cach nen duoc GIU
-    # vo dieu kien. Ke ca voi VA thi do van la mot lo hong: mot cau hoi ngoai tai lieu
-    # tinh co trung du tu van lot thang qua cua loc. Tinh khoang cach o day dong no
-    # lai, va khong ton them lan goi API nao.
-    vector = await embed_query(query)
+    # Distance improves the fallback filter, but lexical matching remains available
+    # during an embedding outage. HybridKnowledge marks that partial result degraded.
+    identity = await _ready_identity(scope)
+    vector: list[float] | None
+    try:
+        vector = await embed_query(query)
+    except Exception as error:
+        vector = None
+        _log.warning("embedding gian doan, lexical van tra cuu", error=type(error).__name__)
+    if embedding_identity() != identity:
+        raise RuntimeError("Embedding configuration changed during retrieval")
     rows = await fetch(
-        """SELECT c.id, c.section, c.page, c.content, d.title,
-                  (c.embedding <=> $4::vector) AS distance
-             FROM kb_chunk c
-             JOIN kb_document d ON d.id = c.doc_id,
-                  plainto_tsquery('simple', unaccent('unaccent', $1)) AS q
-            WHERE c.tsv @@ q AND d.la_ban_moi_nhat
-              AND d.pham_vi IN ('chung', $3)
-            ORDER BY ts_rank(c.tsv, q) DESC
-            LIMIT $2""",
+        _provenance_cte(5) + """
+            SELECT hits.*, provenance.* FROM provenance LEFT JOIN LATERAL (
+                SELECT c.id, c.section, c.page, c.content, d.title,
+                       d.id AS doc_id, d.version AS doc_version, d.pham_vi AS doc_scope,
+                       d.la_ban_moi_nhat AS is_latest,
+                       CASE WHEN $4::vector IS NULL THEN NULL
+                            ELSE (c.embedding <=> $4::vector) END AS distance
+                  FROM kb_chunk c JOIN visible_documents d ON d.id = c.doc_id,
+                       plainto_tsquery('simple', unaccent('unaccent', $1)) AS q
+                 WHERE c.tsv @@ q AND
+                       (d.embedding_provider,d.embedding_model,d.embedding_dim,d.embedding_revision)
+                       = ($5::text,$6::text,$7::int,$8::text)
+                 ORDER BY ts_rank(c.tsv, q) DESC LIMIT $2
+            ) hits ON true""",
         query,
         limit,
         scope_key(scope),
-        "[" + ",".join(f"{v:.7f}" for v in vector) + "]",
+        "[" + ",".join(f"{v:.7f}" for v in vector) + "]" if vector is not None else None,
+        *_identity_args(identity),
     )
-    return [_to_row(r, float(r["distance"])) for r in rows]
+    return _checked_rows(rows, identity)

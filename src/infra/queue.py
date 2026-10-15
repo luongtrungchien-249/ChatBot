@@ -15,6 +15,7 @@ cau/gio o truong hop xau nhat (timeout 15s moi cau), trong khi muc tieu la
 Redis. Khong giai quyet som mot van de chua co.
 """
 
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -22,8 +23,10 @@ from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 
 from agents.domain.message import Attachment, InboundMessage, ReplyTo
-from agents.domain.thread import Platform
+from agents.domain.thread import Platform, ThreadScope
 from config import get_settings
+
+from .thread_lifecycle import generation_for
 
 QUEUE_REPLY = "reply"
 QUEUE_MAINTENANCE = "maintenance"
@@ -62,6 +65,11 @@ def to_payload(msg: InboundMessage) -> dict[str, Any]:
 
 
 def from_payload(data: dict[str, Any]) -> InboundMessage:
+    data = {
+        key: value
+        for key, value in data.items()
+        if key not in {"_enqueued_at_ms", "_thread_generation"}
+    }
     reply_to = data.get("reply_to")
     attachments = data.get("attachments") or ()
     return InboundMessage(
@@ -74,10 +82,19 @@ def from_payload(data: dict[str, Any]) -> InboundMessage:
 
 
 async def enqueue_reply(msg: InboundMessage) -> None:
+    generation = (
+        await generation_for(ThreadScope(msg.platform, msg.thread_id))
+        if msg.platform == "web"
+        else None
+    )
     queue = await get_queue()
     await queue.enqueue_job(
         "handle_reply",
-        to_payload(msg),
+        {
+            **to_payload(msg),
+            "_enqueued_at_ms": int(time.time() * 1000),
+            **({"_thread_generation": generation} if generation is not None else {}),
+        },
         _job_id=job_id_for(msg.platform, msg.message_id),
         _queue_name=QUEUE_REPLY,
     )
@@ -91,11 +108,19 @@ async def enqueue_summarize(platform: Platform, thread_id: str) -> None:
     ban than job phai chiu duoc viec chay thua — no bat dau bang mot cau COUNT va
     thoat ngay khi chua du nguong.
     """
+    generation = (
+        await generation_for(ThreadScope(platform, thread_id)) if platform == "web" else None
+    )
     queue = await get_queue()
     await queue.enqueue_job(
         "handle_summarize",
-        {"platform": platform, "thread_id": thread_id},
-        _job_id=f"sum-{platform}-{thread_id}",
+        {
+            "platform": platform,
+            "thread_id": thread_id,
+            **({"_thread_generation": generation} if generation is not None else {}),
+        },
+        _job_id=f"sum-{platform}-{thread_id}"
+        + (f"-g{generation}" if generation is not None else ""),
         _queue_name=QUEUE_MAINTENANCE,
     )
 

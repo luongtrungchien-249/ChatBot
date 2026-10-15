@@ -30,7 +30,7 @@ import math
 
 from llm.embedder import get_embedder
 
-from ._cham import goi_cham, la_thoai_thac
+from ._cham import goi_cham
 
 #: So cau hoi doan nguoc. RAGAS mac dinh 3. Tang len thi diem on dinh hon nhung moi
 #: cau la them mot vector phai nhung.
@@ -54,9 +54,6 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 async def judge_answer_relevance(question: str, answer: str, trace_id: str) -> float | None:
     """0.0 - 1.0. None khi cau tra loi la loi tu choi, hoac khi khong doan duoc cau nao."""
-    if la_thoai_thac(answer):
-        return None
-
     raw = await goi_cham(system=HUONG_DAN, input=f"CÂU TRẢ LỜI:\n{answer}", trace_id=trace_id)
     doan = [d.strip() for d in raw.splitlines() if d.strip()][:SO_CAU_DOAN]
     if not doan:

@@ -29,6 +29,9 @@ from knowledge.ingest.pipeline import ingest_file
 from memory.repository.fact_repo import cho_duyet, danh_dau_da_duyet, dump_thread, revoke
 
 from .container import build_deps
+from .embedding_admin import embeddings_command
+from .memory_embeddings import memory_embeddings_command
+from .web_owners import owners_command
 
 MIGRATIONS_DIR = Path.cwd() / "db" / "migrations"
 
@@ -385,8 +388,8 @@ async def review_command(args: list[str]) -> int:
 
 async def main() -> int:
     _buoc_stdout_utf8()
-    configure_logging()
     command = sys.argv[1] if len(sys.argv) > 1 else "chat"
+    configure_logging(stderr=command in {"embeddings", "owners", "memory-embeddings"})
 
     try:
         if command == "migrate":
@@ -403,10 +406,17 @@ async def main() -> int:
             return await stats_command(sys.argv[2:])
         elif command == "review":
             return await review_command(sys.argv[2:])
+        elif command == "embeddings":
+            return await embeddings_command(sys.argv[2:])
+        elif command == "owners":
+            return await owners_command(sys.argv[2:])
+        elif command == "memory-embeddings":
+            return await memory_embeddings_command(sys.argv[2:])
         else:
             print(
                 f"Lenh khong biet: {command}. "
-                "Co: migrate | chat | allow | deny | allowed | memory | review | ingest | stats",
+                "Co: migrate | chat | allow | deny | allowed | memory | review | ingest | stats "
+                "| embeddings | owners | memory-embeddings",
                 file=sys.stderr,
             )
             return 1

@@ -6,10 +6,16 @@ hom nay va khong can dung them gi. Grafana la buoc sau, khong phai buoc dau.
 Moi ham o day chi DOC. Khong ham nao ghi, khong ham nao xoa.
 """
 
+import math
+import time
 from dataclasses import dataclass
 
+from config import get_settings
+
 from .db import fetch
+from .queue_metrics import queue_age
 from .ratelimit import spent_today
+from .redis_client import aw, get_redis
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +38,8 @@ class TurnStats:
 
     `usage_log.latency_ms` la do tre cua MOT LAN GOI. Mot luot co tra cuu gom nhieu
     lan goi model cong nhieu lan chay cong cu, nen hai con so do lech nhau vai lan.
-    Cong theo `trace_id` moi ra dung thu de so voi muc tieu — moi buoc trong mot luot
-    deu mang cung mot trace_id (luat L8).
+    Wall-clock duoc worker ghi trong `turn_telemetry`; khong cong do tre upstream
+    vi cac tool co the chay song song. `usage_log` chi phan loai co/khong tool.
     """
 
     #: True = luot nay co tra cuu.
@@ -101,20 +107,15 @@ async def turn_stats(days: int = 7) -> list[TurnStats]:
     buoc hai lan goi model cong thoi gian chay cong cu, nen ep no ve cung muc voi luot
     khong tra cuu la ep bo tra cuu. Gop chung lai thi khong biet dang truot cai nao.
 
-    Bo qua route `embed`: no chay ca ngoai duong phan hoi (job nen, trich fact) nen
-    cong vao se lam do tre luot trong sai lech.
+    Chi tinh cac turn co telemetry worker; du lieu cu khong duoc suy doan wall-clock.
     """
     rows = await fetch(
         """WITH luot AS (
-             SELECT trace_id,
-                    -- Mot luot CO tra cuu la mot luot co it nhat mot buoc route='tool'.
-                    -- Khong dung mot cot rieng: xem db/migrations/0010.
-                    bool_or(route = 'tool') AS co_tra_cuu,
-                    sum(latency_ms)         AS tong_ms
-               FROM usage_log
-              WHERE route IN ('reply', 'tool')
-                AND created_at > now() - ($1 || ' days')::interval
-              GROUP BY trace_id
+             SELECT EXISTS (SELECT 1 FROM usage_log u
+                            WHERE u.trace_id = t.trace_id AND u.route = 'tool') AS co_tra_cuu,
+                    t.latency_ms AS tong_ms
+               FROM turn_telemetry t
+              WHERE t.created_at > now() - ($1 || ' days')::interval
            )
            SELECT co_tra_cuu,
                   count(*)                                          AS luot,
@@ -182,6 +183,13 @@ def _line(name: str, labels: str, value: float) -> str:
     return f"{name}{{{labels}}} {value}" if labels else f"{name} {value}"
 
 
+def _route_labels(stats: RouteStats) -> str:
+    def escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+    return f'route="{escape(stats.route)}",model="{escape(stats.model)}"'
+
+
 async def prometheus_text(days: int, budget_usd: float) -> str:
     """Dinh dang phoi bay cua Prometheus. Grafana doc thang duoc.
 
@@ -207,20 +215,20 @@ async def prometheus_text(days: int, budget_usd: float) -> str:
         "# TYPE cp_llm_calls_total gauge",
     ]
     for r in routes:
-        tag = f'route="{r.route}",model="{r.model}"'
+        tag = _route_labels(r)
         out.append(_line("cp_llm_calls_total", tag, r.calls))
     out += ["# HELP cp_llm_errors_total So lan goi that bai.", "# TYPE cp_llm_errors_total gauge"]
     for r in routes:
-        out.append(_line("cp_llm_errors_total", f'route="{r.route}"', r.errors))
+        out.append(_line("cp_llm_errors_total", _route_labels(r), r.errors))
     out += ["# HELP cp_llm_cost_usd Chi phi theo route.", "# TYPE cp_llm_cost_usd gauge"]
     for r in routes:
-        out.append(_line("cp_llm_cost_usd", f'route="{r.route}"', round(r.cost_usd, 6)))
+        out.append(_line("cp_llm_cost_usd", _route_labels(r), round(r.cost_usd, 6)))
     out += [
         "# HELP cp_llm_latency_p95_ms Do tre p95. Muc tieu duong tra loi: < 5000.",
         "# TYPE cp_llm_latency_p95_ms gauge",
     ]
     for r in routes:
-        out.append(_line("cp_llm_latency_p95_ms", f'route="{r.route}"', r.p95_latency_ms))
+        out.append(_line("cp_llm_latency_p95_ms", _route_labels(r), r.p95_latency_ms))
     out += [
         "# HELP cp_turn_latency_p95_ms Do tre CA LUOT — thu nguoi dung cam nhan.",
         "# Muc tieu: khong tra cuu < 5000, co tra cuu < 15000.",
@@ -242,4 +250,186 @@ async def prometheus_text(days: int, budget_usd: float) -> str:
             round(cache.calls_with_cache / cache.total_calls, 4) if cache.total_calls else 0.0,
         ),
     ]
+    runtime = await fetch(
+        """SELECT outcome,count(*) n,
+             percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms) latency,
+             percentile_disc(0.95) WITHIN GROUP (ORDER BY queue_wait_ms) queue_wait
+           FROM turn_telemetry WHERE created_at > now() - interval '5 minutes'
+           GROUP BY outcome"""
+    )
+    out += [
+        "# HELP cp_runtime_turns Turn outcomes in the last 5 minutes (rolling gauge).",
+        "# TYPE cp_runtime_turns gauge",
+        "# HELP cp_runtime_turn_latency_p95_ms Worker wall-clock p95 in the last 5 minutes.",
+        "# TYPE cp_runtime_turn_latency_p95_ms gauge",
+        "# HELP cp_queue_wait_p95_ms Queue wait p95 in the last 5 minutes.",
+        "# TYPE cp_queue_wait_p95_ms gauge",
+        "# HELP cp_heartbeat_age_seconds Seconds since last process heartbeat.",
+        "# TYPE cp_heartbeat_age_seconds gauge",
+        "# HELP cp_queue_depth Jobs currently queued, including in-progress jobs.",
+        "# TYPE cp_queue_depth gauge",
+        "# HELP cp_queue_oldest_age_seconds Original enqueue age, including deferred/running jobs.",
+        "# TYPE cp_queue_oldest_age_seconds gauge",
+        "# HELP cp_queue_age_complete All queued timestamps read (1); unknown age (0).",
+        "# TYPE cp_queue_age_complete gauge",
+    ]
+    by_outcome = {row["outcome"]: row for row in runtime}
+    for outcome in ("completed", "error"):
+        row = by_outcome.get(outcome)
+        tag = f'outcome="{outcome}"'
+        out.append(_line("cp_runtime_turns", tag, int(row["n"]) if row else 0))
+        # No percentile exists without observations; do not invent a zero latency.
+        if row:
+            out.append(_line("cp_runtime_turn_latency_p95_ms", tag, int(row["latency"])))
+            out.append(_line("cp_queue_wait_p95_ms", tag, int(row["queue_wait"])))
+
+    details = await fetch(
+        """SELECT reason,count(*) n,
+             count(*) FILTER (WHERE replied AND fallback IS NOT NULL) measured_replies,
+             count(*) FILTER (WHERE replied AND fallback) fallbacks,
+             count(react_iterations) react_turns,
+             coalesce(sum(react_iterations),0) iterations,
+             coalesce(sum(tool_calls),0) tool_calls,
+             coalesce(sum(tool_errors),0) tool_errors,
+             coalesce(sum(poetry_calls),0) poetry_calls,
+             count(poetry_calls) poetry_turns,
+             coalesce(sum(recorded_cost_usd),0) recorded_cost_usd
+           FROM turn_telemetry WHERE created_at > now() - interval '5 minutes'
+           GROUP BY reason"""
+    )
+    out += [
+        "# HELP cp_runtime_turn_reason Last-attempt turn reasons in the last 5 minutes.",
+        "# TYPE cp_runtime_turn_reason gauge",
+    ]
+    for row in details:
+        out.append(_line("cp_runtime_turn_reason", f'reason="{row["reason"]}"', int(row["n"])))
+    for name, column, description in (
+        (
+            "cp_runtime_measured_replies",
+            "measured_replies",
+            "Replies with measured fallback status",
+        ),
+        ("cp_runtime_fallbacks", "fallbacks", "Fallback replies actually sent"),
+        ("cp_runtime_react_turns", "react_turns", "Turns with measured ReAct counts"),
+        ("cp_runtime_react_iterations", "iterations", "ReAct model calls including failures"),
+        ("cp_runtime_tool_calls", "tool_calls", "Tool calls requested during ReAct"),
+        ("cp_runtime_tool_errors", "tool_errors", "Failed tool observations during ReAct"),
+        ("cp_runtime_poetry_calls", "poetry_calls", "Poetry model and judge attempts"),
+        ("cp_runtime_poetry_turns", "poetry_turns", "Turns with measured poetry attempts"),
+    ):
+        out += [
+            f"# HELP {name} {description}, last attempts in a rolling 5-minute window.",
+            f"# TYPE {name} gauge",
+            _line(name, "", sum(int(row.get(column, 0)) for row in details)),
+        ]
+    out += [
+        "# HELP cp_runtime_recorded_cost_usd Trace-linked usage cost estimates, rolling 5 minutes.",
+        "# TYPE cp_runtime_recorded_cost_usd gauge",
+        _line(
+            "cp_runtime_recorded_cost_usd",
+            "",
+            round(sum(float(row["recorded_cost_usd"]) for row in details), 6),
+        ),
+    ]
+    out.extend(await _rag_prometheus())
+    failures = await fetch(
+        """SELECT failure_service,failure_kind,count(*) n FROM turn_telemetry
+           WHERE created_at > now() - interval '5 minutes'
+             AND failure_kind IS NOT NULL GROUP BY failure_service,failure_kind"""
+    )
+    out += [
+        "# HELP cp_runtime_upstream_failures Measured last-attempt upstream causes, rolling 5m.",
+        "# TYPE cp_runtime_upstream_failures gauge",
+    ]
+    for row in failures:
+        out.append(
+            _line(
+                "cp_runtime_upstream_failures",
+                f'service="{row["failure_service"]}",kind="{row["failure_kind"]}"',
+                int(row["n"]),
+            )
+        )
+    redis = get_redis()
+    out += [
+        "# HELP cp_process_expected Explicit operator expectation of an optional process.",
+        "# TYPE cp_process_expected gauge",
+        _line(
+            "cp_process_expected", 'component="zalo"',
+            int(get_settings().ZALO_POLLING_EXPECTED),
+        ),
+        "# HELP cp_heartbeat_observed A valid process heartbeat was observed (1) or not (0).",
+        "# TYPE cp_heartbeat_observed gauge",
+    ]
+    for component in ("worker", "maintenance", "zalo"):
+        timestamp = await aw(redis.get(f"heartbeat:{component}"))
+        try:
+            measured = float(timestamp) if timestamp is not None else None
+            if measured is not None and (not math.isfinite(measured) or measured < 0):
+                measured = None
+        except (ValueError, TypeError):
+            measured = None
+        tag = f'component="{component}"'
+        out.append(_line("cp_heartbeat_observed", tag, int(measured is not None)))
+        if measured is not None:
+            out.append(_line("cp_heartbeat_age_seconds", tag, max(0.0, time.time() - measured)))
+    for queue in ("reply", "maintenance"):
+        depth = await aw(redis.zcard(queue))
+        out.append(_line("cp_queue_depth", f'queue="{queue}"', depth))
+        observed_age = await queue_age(queue)
+        out.append(_line("cp_queue_age_complete", f'queue="{queue}"', int(observed_age.complete)))
+        if observed_age.oldest_seconds is not None:
+            out.append(
+                _line(
+                    "cp_queue_oldest_age_seconds", f'queue="{queue}"', observed_age.oldest_seconds
+                )
+            )
     return chr(10).join(out) + chr(10)
+
+
+async def _rag_prometheus() -> list[str]:
+    rows = await fetch(
+        """SELECT outcome,count(*) n,
+             count(*) FILTER (WHERE retrieval_degraded
+               AND outcome NOT IN ('cancelled','unknown')) retrieval_degraded,
+             count(*) FILTER (WHERE rerank_degraded
+               AND outcome NOT IN ('cancelled','unknown')) rerank_degraded,
+             count(*) FILTER (WHERE (retrieval_degraded OR rerank_degraded)
+               AND outcome NOT IN ('cancelled','unknown')) degraded,
+             count(*) FILTER (WHERE low_confidence) low_confidence,
+             percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms) latency
+           FROM rag_telemetry WHERE created_at > now() - interval '5 minutes'
+           GROUP BY outcome"""
+    )
+    by_outcome = {row["outcome"]: row for row in rows}
+    out = [
+        "# HELP cp_rag_requests Knowledge-tool attempts, rolling 5 minutes; not unique turns.",
+        "# TYPE cp_rag_requests gauge",
+        "# HELP cp_rag_latency_p95_ms Knowledge-tool attempt wall-clock p95, rolling 5 minutes.",
+        "# TYPE cp_rag_latency_p95_ms gauge",
+        "# HELP cp_rag_degraded_requests Noncancelled degraded attempts, rolling 5 minutes.",
+        "# TYPE cp_rag_degraded_requests gauge",
+        "# HELP cp_rag_low_confidence_requests Low-confidence attempts, rolling 5 minutes.",
+        "# TYPE cp_rag_low_confidence_requests gauge",
+    ]
+    for outcome in ("found", "empty", "filtered", "uncertain", "error", "cancelled", "unknown"):
+        row = by_outcome.get(outcome)
+        tag = f'outcome="{outcome}"'
+        out.append(_line("cp_rag_requests", tag, int(row["n"]) if row else 0))
+        if row:
+            out.append(_line("cp_rag_latency_p95_ms", tag, int(row["latency"])))
+    for stage, column in (
+        ("retrieval", "retrieval_degraded"),
+        ("rerank", "rerank_degraded"),
+        ("any", "degraded"),
+    ):
+        out.append(
+            _line(
+                "cp_rag_degraded_requests",
+                f'stage="{stage}"',
+                sum(int(row[column]) for row in rows),
+            )
+        )
+    out.append(
+        _line("cp_rag_low_confidence_requests", "", sum(int(row["low_confidence"]) for row in rows))
+    )
+    return out

@@ -190,7 +190,8 @@ class TestLoi:
         # Cau hoi phai con trong lich su du model hong.
         appended = deps.memory.appended  # type: ignore[attr-defined]
         assert [(a.text, a.from_bot) for a in appended] == [
-            ("deadline bao cao quy 3 la ngay nao", False)
+            ("deadline bao cao quy 3 la ngay nao", False),
+            (FALLBACK_TEXT, True),
         ]
 
 

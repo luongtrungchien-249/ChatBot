@@ -7,7 +7,7 @@ Day la NOI DUY NHAT trong codebase duoc cham bien moi truong; luat so 2 trong
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: Tu vung chinh sach thuoc ve agents/policy, config chi kiem tra .env co khop khong.
@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     ZALO_BOT_TOKEN: str = ""
     ZALO_MODE: Literal["webhook", "polling"] = "polling"
     ZALO_WEBHOOK_SECRET: str = ""
+    #: Operator expectation for heartbeat alerts; not inferred from token presence.
+    #: Set true only when the polling process is intended to run in this deployment.
+    ZALO_POLLING_EXPECTED: bool = False
 
     # --- Chinh sach ---
     #: Mot hoac NHIEU ten goi, ngan cach bang dau phay: "CP_Assistant,CP".
@@ -158,10 +161,35 @@ class Settings(BaseSettings):
     REACT_DEADLINE_MS: int = Field(default=60_000, gt=0)
 
     # --- Giao dien web ---
-    WEB_PORT: int = Field(default=3000, gt=0)
+    WEB_PORT: int = Field(default=3000, gt=0, le=65535)
     #: Chi localhost. Mo ra 0.0.0.0 khi CHUA co auth nghia la ai trong mang cung dot
     #: duoc ngan sach cua ban.
     WEB_BIND: str = "127.0.0.1"
+    WEB_AUTH_MODE: Literal["dev", "trusted_header"] = "dev"
+    WEB_AUTH_ISSUER: str = ""
+    WEB_AUTH_HEADER_SECRET: str = ""
+    # Dedicated read-only service credential; never grants conversation access.
+    METRICS_SCRAPE_TOKEN: str = ""
+
+    @model_validator(mode="after")
+    def validate_web_auth(self) -> "Settings":
+        if self.ZALO_MODE == "webhook":
+            raise ValueError("ZALO_MODE=webhook chua co signature contract; dung polling")
+        if self.ZALO_POLLING_EXPECTED and not self.ZALO_BOT_TOKEN.strip():
+            raise ValueError("ZALO_POLLING_EXPECTED=true can ZALO_BOT_TOKEN")
+        if self.METRICS_SCRAPE_TOKEN and len(self.METRICS_SCRAPE_TOKEN) < 32:
+            raise ValueError("METRICS_SCRAPE_TOKEN phai co it nhat 32 ky tu")
+        loopback = self.WEB_BIND in {"127.0.0.1", "::1", "localhost"}
+        if self.WEB_AUTH_MODE == "dev":
+            if self.NODE_ENV not in {"development", "test"} or not loopback:
+                raise ValueError(
+                    "WEB_AUTH_MODE=dev chi duoc dung khi development/test tren loopback"
+                )
+        elif len(self.WEB_AUTH_HEADER_SECRET) < 32 or not self.WEB_AUTH_ISSUER:
+            raise ValueError(
+                "trusted_header can WEB_AUTH_ISSUER va WEB_AUTH_HEADER_SECRET >= 32 ky tu"
+            )
+        return self
 
     #: BAT BUOC, khong co mac dinh. Xem ARCHITECTURE.md section 8.3 de tinh nguoc
     #: tu ngan sach thang.

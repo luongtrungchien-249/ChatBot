@@ -17,9 +17,14 @@ phai so ngau nhien: cung mot chuoi luon cho cung mot vector, nen cac test ve tru
 lap va mau thuan van co nghia.
 """
 
+import asyncio
 import hashlib
+import json
 import math
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -56,11 +61,67 @@ EMBED_TIMEOUT_S = 20.0
 #: Nen retry o day an toan tuyet doi — khac han mot lan goi sinh van ban.
 EMBED_MAX_RETRIES = 2
 
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingConfig:
     model: str
     dimensions: int
     price_per_million: float
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIdentity:
+    """Configuration identity, not a claim that an API alias is immutable.
+
+    Persist alongside stored vectors. Dimension alone never proves compatibility.
+    ``revision`` identifies the local input/vector implementation, including the
+    deterministic fake algorithm, and must change if that implementation changes.
+    """
+
+    provider: str
+    model: str
+    dimensions: int
+    revision: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.provider not in {"openai", "fake"}
+            or not self.model.strip()
+            or type(self.dimensions) is not int
+            or self.dimensions < 1
+            or not self.revision.strip()
+        ):
+            raise ValueError("Invalid embedding identity")
+
+
+def embedding_identity() -> EmbeddingIdentity:
+    """Identity of the implementation actually selected by get_embedder()."""
+    settings = get_settings()
+    provider = settings.EMBEDDING_PROVIDER.lower()
+    if provider == "fake":
+        return EmbeddingIdentity("fake", "sha256", settings.EMBEDDING_DIM, "hash-vector-v1")
+    if provider != "openai":
+        raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider!r}")
+    config = embedding_config()
+    return EmbeddingIdentity(provider, config.model, config.dimensions, "openai-embedding-v1")
+
+
+_model_override: ContextVar[str | None] = ContextVar("benchmark_embedding_model", default=None)
+
+
+@contextmanager
+def embedding_model_override(model: str | None) -> Iterator[None]:
+    """Task-local benchmark override; never change .env, corpus, or other tasks."""
+    if model is None:
+        yield
+        return
+    if get_settings().EMBEDDING_PROVIDER.lower() != "openai" or model not in EMBEDDING_PRICES:
+        raise ValueError("Embedding benchmark needs a priced OpenAI model")
+    token = _model_override.set(model)
+    try:
+        yield
+    finally:
+        _model_override.reset(token)
 
 
 def embedding_config() -> EmbeddingConfig:
@@ -75,16 +136,14 @@ def embedding_config() -> EmbeddingConfig:
     con so sai.
     """
     settings = get_settings()
-    model = settings.EMBEDDING_MODEL or DEFAULT_MODEL
+    model = _model_override.get() or settings.EMBEDDING_MODEL or DEFAULT_MODEL
     price = EMBEDDING_PRICES.get(model)
     if price is None:
         raise RuntimeError(
             f"EMBEDDING_MODEL={model!r} khong co trong EMBEDDING_PRICES (llm/models.py). "
             "Them gia cua no vao do truoc, neu khong usage_log se ghi sai tien."
         )
-    return EmbeddingConfig(
-        model=model, dimensions=settings.EMBEDDING_DIM, price_per_million=price
-    )
+    return EmbeddingConfig(model=model, dimensions=settings.EMBEDDING_DIM, price_per_million=price)
 
 
 #: MOT client dung chung cho ca process, khong phai mot client moi moi lan goi.
@@ -191,24 +250,66 @@ def _hash_vector(text: str, dimensions: int = DIMENSIONS) -> list[float]:
 #: cua model cu, va ket qua sai mot cach hoan toan im lang.
 _QUERY_CACHE_TTL_SECONDS = 86_400
 
+_query_tasks: ContextVar[dict[str, asyncio.Task[list[float]]] | None] = ContextVar(
+    "shared_query_embedding_tasks", default=None
+)
+
+
+@contextmanager
+def shared_query_embeddings() -> Iterator[None]:
+    """Share cold-cache work between branches within one retrieval operation.
+
+    A Redis cache does not serialize concurrent misses. Task-local sharing also
+    shares failures, without retaining them across unrelated turns.
+    """
+    if _query_tasks.get() is not None:
+        yield
+        return
+    token = _query_tasks.set({})
+    try:
+        yield
+    finally:
+        _query_tasks.reset(token)
+
+
+def _query_cache_key(provider: str, config: EmbeddingConfig, text: str) -> str:
+    # V1 omitted the provider: a local fake run could poison real query vectors.
+    # Do not read old keys with unknown provenance; they expire by their own TTL.
+    revision = "hash-vector-v1" if provider.lower() == "fake" else "openai-embedding-v1"
+    identity = json.dumps([provider.lower(), config.model, config.dimensions, revision, text])
+    return "emb:v2:" + hashlib.sha256(identity.encode()).hexdigest()
+
 
 async def embed_query(text: str) -> list[float]:
     """Vector cua mot chuoi, co cache Redis. Redis hong thi embed lai."""
-    import hashlib
-    import json
-
-    from infra.redis_client import aw, get_redis
-
     config = embedding_config()
-    digest = hashlib.sha256(f"{config.model}:{config.dimensions}:{text}".encode()).hexdigest()
-    key = f"emb:{digest}"
+    key = _query_cache_key(get_settings().EMBEDDING_PROVIDER, config, text)
+    tasks = _query_tasks.get()
+    if tasks is None:
+        return await _embed_query(text, config, key)
+    if key not in tasks:
+        tasks[key] = asyncio.create_task(_embed_query(text, config, key))
+    return await tasks[key]
+
+
+async def _embed_query(text: str, config: EmbeddingConfig, key: str) -> list[float]:
+    from infra.redis_client import aw, get_redis
 
     try:
         cached = await aw(get_redis().get(key))
         if cached:
-            vector: list[float] = json.loads(cached)
-            if len(vector) == config.dimensions:
-                return vector
+            vector = json.loads(cached)
+            if (
+                isinstance(vector, list)
+                and len(vector) == config.dimensions
+                and all(
+                    isinstance(value, int | float)
+                    and not isinstance(value, bool)
+                    and math.isfinite(value)
+                    for value in vector
+                )
+            ):
+                return [float(value) for value in vector]
     except Exception as error:
         _log.warning("doc cache embedding that bai, embed lai", err=str(error))
 
@@ -236,11 +337,13 @@ def get_embedder() -> EmbedderPort:
         provider = settings.EMBEDDING_PROVIDER.lower()
         if provider == "openai":
             _embedder = OpenAiEmbedder()
-        else:
+        elif provider == "fake":
             _log.warning(
                 "EMBEDDING_PROVIDER khong phai 'openai' — dung embedder GIA. "
                 "Fact van luu duoc nhung chong trung va truy xuat theo y nghia se VO NGHIA.",
                 provider=provider,
             )
             _embedder = FakeEmbedder(dimensions=settings.EMBEDDING_DIM)
+        else:
+            raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider!r}")
     return _embedder

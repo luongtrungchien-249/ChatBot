@@ -11,13 +11,17 @@ from typing import Literal, TypeAlias
 
 from agents.domain.message import InboundMessage
 
-WEB_SENDER_ID = "web-user"
 WEB_MAX_MESSAGE_CHARS = 8_000
 
 
 def web_channel_key(thread_id: str) -> str:
     """Kenh Redis pub/sub cho mot thread. api SUBSCRIBE, worker PUBLISH."""
     return f"web:out:{thread_id}"
+
+
+def web_final_key(thread_id: str) -> str:
+    """Short-lived recovery cache; thread deletion must invalidate it."""
+    return f"web:final:{thread_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +33,8 @@ class TypingEvent:
 class FinalEvent:
     text: str
     type: Literal["final"] = "final"
+    reply_to: str | None = None
+    generation: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +52,14 @@ class ErrorEvent:
 WebEvent: TypeAlias = TypingEvent | FinalEvent | ErrorEvent
 
 
-def normalize_web_input(thread_id: str, text: str) -> InboundMessage:
+def normalize_web_input(
+    thread_id: str, text: str, *, user_id: str, display_name: str
+) -> InboundMessage:
     return InboundMessage(
         platform="web",
         thread_id=thread_id,
-        sender_id=WEB_SENDER_ID,
-        sender_name="Bạn",
+        sender_id=user_id,
+        sender_name=display_name,
         text=text,
         # Web la hoi thoai 1-1: khong can mention.
         is_group=False,

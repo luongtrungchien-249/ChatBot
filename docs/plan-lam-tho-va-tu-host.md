@@ -1,5 +1,10 @@
 # Plan: làm thơ lục bát / thất ngôn tứ tuyệt, và tự host model
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 *11/09/2026. Đây là bản kế hoạch, chưa thi công dòng nào.*
 
 > **§0.2 đã có câu trả lời, và nó chặn việc tự host trên máy này: RTX 3050 Ti, 4 GB
@@ -705,4 +710,3 @@ vẫn tốn tiền thật, chỉ là bot không đếm được.
 
 Nếu sau này chuyển cả bot sang tự host thì chặn ngân sách mất tác dụng hoàn toàn, và
 phải thay bằng một chặn khác (số lượt/giờ chẳng hạn). Chưa làm.
-

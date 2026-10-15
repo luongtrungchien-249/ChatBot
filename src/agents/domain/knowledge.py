@@ -33,3 +33,24 @@ class RetrievedChunk:
     #: None khi khong tinh duoc. Cho goi phai coi None la "khong biet", va khong
     #: duoc suy ra "chac" hay "khong chac" tu no.
     distance: float | None = None
+    doc_id: str | None = None
+    doc_version: int | None = None
+    doc_scope: str | None = None
+    is_latest: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalEvidence:
+    """Source metadata observed by retrieval; never infer it from citation text."""
+
+    chunk_id: str
+    doc_id: str | None = None
+    doc_version: int | None = None
+    doc_scope: str | None = None
+    is_latest: bool | None = None
+
+    @classmethod
+    def from_chunk(cls, chunk: RetrievedChunk) -> "RetrievalEvidence":
+        return cls(
+            chunk.chunk_id, chunk.doc_id, chunk.doc_version, chunk.doc_scope, chunk.is_latest
+        )

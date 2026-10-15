@@ -1,5 +1,10 @@
 # Tầng `agents/` — phân tích và plan thi công
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 17/09/2026. Trạng thái: **đã thi công xong**; plan này là bản **đặc tả kỹ
 > thuật ngược** — viết lại tầng này cần làm gì, theo thứ tự nào, bằng kỹ thuật gì.
 >

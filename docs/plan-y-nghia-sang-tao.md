@@ -1,5 +1,10 @@
 # Nâng `ý nghĩa` và `sáng tạo` của thơ — plan
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 14/09/2026. Trạng thái: **bước 0 và B1 đã xong** (§8). B1 trượt và đã tắt.
 > B2, B3 chưa làm — và §8.4 đổi điều kiện cho chúng.
 >

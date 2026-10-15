@@ -1,0 +1,18 @@
+{
+  "status": "integration_contract_requires_operator_implementation_and_acceptance",
+  "backend": "http://127.0.0.1:3000",
+  "auth_mode": "trusted_header",
+  "request_version": "cp-web-v2",
+  "requirements": [
+    "Verify OIDC issuer, audience, signature, token validity and session before forwarding.",
+    "Map verified immutable subject to user_id; authorize roles from trusted directory claims.",
+    "Strip all client-supplied x-cp-* headers, including duplicates; never forward bearer tokens as identity.",
+    "Sign the exact method, raw path, query and body received after all rewrites using auth.py canonical JSON bytes.",
+    "Create a new cryptographic nonce and signature on each retry and SSE reconnect.",
+    "Protect TLS, apply request body limits, disable SSE buffering and synchronize clocks.",
+    "Restrict backend network access to the signing proxy and monitoring; forbid anonymous fallback.",
+    "Verify cross-user REST and SSE isolation with real proxy identities before opening traffic."
+  ],
+  "reference": "src/adapters/web/auth.py::_canonical; docs/runbook.md",
+  "acceptance_not_provided": ["OIDC login", "organization role mapping", "legacy owner backfill", "production network policy"]
+}

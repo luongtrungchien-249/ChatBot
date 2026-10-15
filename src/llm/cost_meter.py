@@ -24,6 +24,14 @@ from .models import Route, model_cho
 _log = get_logger()
 
 
+async def _record_budget(cost_usd: float) -> None:
+    # Accounting sinks fail independently: a DB outage must not skip Redis spend.
+    try:
+        await add_cost(cost_usd)
+    except Exception as error:
+        _log.error("daily budget recording failed", error_type=type(error).__name__)
+
+
 def cost_of(route: Route, usage: LlmUsage) -> float:
     """USD cho mot lan goi.
 
@@ -60,9 +68,7 @@ class UsageRecord:
     ok: bool
 
 
-async def record_embedding(
-    *, model: str, tokens: int, cost_usd: float, latency_ms: int
-) -> None:
+async def record_embedding(*, model: str, tokens: int, cost_usd: float, latency_ms: int) -> None:
     """Ghi mot lan goi EMBEDDING.
 
     Duong rieng chu khong dung `record()`: embedding khong co output token, khong co
@@ -85,9 +91,9 @@ async def record_embedding(
             cost_usd,
             latency_ms,
         )
-        await add_cost(cost_usd)
     except Exception as error:
-        _log.error("khong ghi duoc usage_log cho embedding", err=str(error))
+        _log.error("embedding usage recording failed", error_type=type(error).__name__)
+    await _record_budget(cost_usd)
 
 
 async def record_tool(
@@ -121,6 +127,32 @@ async def record_tool(
         _log.error("khong ghi duoc usage_log cho cong cu", tool=name, err=str(error))
 
 
+async def record_rerank(
+    *, model: str, tokens: int, cost_usd: float, latency_ms: int, ok: bool = True
+) -> None:
+    """Provider-reported rerank input tokens at list price; no content/identity.
+
+    Like embedding, this system attribution is not yet per-turn accounting.
+    Do not subtract unverified free credits from the daily safety budget.
+    """
+    try:
+        await execute(
+            """INSERT INTO usage_log
+                 (trace_id, platform, thread_id, sender_id, route, model,
+                  input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                  cost_usd, latency_ms, ok)
+               VALUES ('system','system','system','system','rerank',$1,$2,0,0,0,$3,$4,$5)""",
+            model,
+            tokens,
+            cost_usd,
+            latency_ms,
+            ok,
+        )
+    except Exception as error:
+        _log.error("Rerank usage recording failed", error_type=type(error).__name__)
+    await _record_budget(cost_usd)
+
+
 async def record(entry: UsageRecord) -> float:
     """Ghi mot lan goi.
 
@@ -150,12 +182,13 @@ async def record(entry: UsageRecord) -> float:
             entry.latency_ms,
             entry.ok,
         )
-        await add_cost(cost)
     except Exception as error:
         _log.error(
-            "khong ghi duoc usage_log — ngan sach ngay dang bi dem thieu",
+            "LLM usage recording failed",
             trace_id=entry.trace_id,
-            err=str(error),
+            error_type=type(error).__name__,
         )
+
+    await _record_budget(cost)
 
     return cost

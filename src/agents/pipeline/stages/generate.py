@@ -33,6 +33,8 @@ from typing import Any, Literal, TypeAlias
 from shared.result import Err, Ok, Result
 
 from ...domain.errors import BotError, UpstreamError, UpstreamTimeout
+from ...domain.telemetry import GenerationReason, GenerationStats
+from ...policy.output_guard import kiem_dau_ra
 from ...ports.llm import (
     AssistantMessage,
     CallContext,
@@ -49,8 +51,7 @@ from ...prompt.context import ContextEnvelope
 
 #: Loi tam thoi: cham, 5xx, mat mang. Thu lai THAT SU co the giup.
 FALLBACK_TEXT = (
-    "Xin lỗi, mình đang bị chậm nên chưa trả lời được câu này. "
-    "Bạn thử hỏi lại sau một chút nhé."
+    "Xin lỗi, mình đang bị chậm nên chưa trả lời được câu này. Bạn thử hỏi lại sau một chút nhé."
 )
 
 #: Loi cau hinh (khoa sai/het han). Bao thu lai la NOI DOI: thu bao nhieu lan cung
@@ -103,8 +104,8 @@ NHAC_TRA_TAI_LIEU = (
     "mới là con số đúng.\n"
     "- Nếu KHÔNG phải câu có dữ kiện — chào hỏi, cảm ơn, nhờ viết lại câu, hỏi về "
     "chính bạn — thì GỬI NGUYÊN câu trả lời bạn vừa soạn. Đừng soạn lại, đừng thêm gì.\n\n"
-    "TUYỆT ĐỐI không nhắc tới tin nhắn này trong câu trả lời: không nói \"mình đã "
-    "hiểu\", không nêu tên công cụ, không kể bạn vừa được nhắc. Người dùng không nhìn "
+    'TUYỆT ĐỐI không nhắc tới tin nhắn này trong câu trả lời: không nói "mình đã '
+    'hiểu", không nêu tên công cụ, không kể bạn vừa được nhắc. Người dùng không nhìn '
     "thấy tin này nên mọi câu như vậy sẽ là một câu vô nghĩa đối với họ."
 )
 
@@ -154,6 +155,17 @@ class GenerateDeps:
     should_stop: Callable[[], Awaitable[bool]] | None = None
     #: Khong await: bao tien do khong duoc chan duong tra loi.
     on_event: Callable[[ReactEvent], None] | None = None
+    #: One content-free report, separate from UI progress events.
+    on_metrics: Callable[[GenerationStats], None] | None = None
+
+
+@dataclass(slots=True)
+class _Meter:
+    reason: GenerationReason = "error"
+    iterations: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    retrieved_chunks: int = 0
 
 
 def _status_of(error: BaseException) -> int | None:
@@ -176,14 +188,12 @@ def _classify(error: BaseException, logger: LoggerPort) -> BotError:
         logger.error("goi model that bai", status=status, err=message)
 
     # Timeout KHONG retry: nguoi dung da nhan cau fallback roi.
-    if _TIMEOUT_PATTERN.search(message):
+    if isinstance(error, TimeoutError) or _TIMEOUT_PATTERN.search(message):
         return UpstreamTimeout(service="llm")
     return UpstreamError(service="llm", status=status)
 
 
-def _finish(
-    text: str, logger: LoggerPort, *, reason: str, iteration: int
-) -> Result[str, BotError]:
+def _finish(text: str, logger: LoggerPort, *, reason: str, iteration: int) -> Result[str, BotError]:
     """Ket thuc som: co van ban thi tra ve kem ghi chu chua day du."""
     if not text.strip():
         logger.warning(
@@ -199,6 +209,30 @@ async def generate(
     ctx: CallContext,
     logger: LoggerPort,
 ) -> Result[str, BotError]:
+    meter = _Meter()
+    try:
+        return await _generate(deps, prompt, ctx, logger, meter)
+    finally:
+        if deps.on_metrics is not None:
+            try:
+                deps.on_metrics(
+                    GenerationStats(
+                        meter.reason, meter.iterations, meter.tool_calls, meter.tool_errors,
+                        meter.retrieved_chunks,
+                    )
+                )
+            except Exception as error:
+                # A telemetry sink must not change reply/retry behavior.
+                logger.warning("generation telemetry failed", error=type(error).__name__)
+
+
+async def _generate(
+    deps: GenerateDeps,
+    prompt: ContextEnvelope,
+    ctx: CallContext,
+    logger: LoggerPort,
+    meter: _Meter,
+) -> Result[str, BotError]:
     deadline = time.monotonic() + deps.deadline_ms / 1000
     specs = tuple(to_spec(d) for d in deps.tools.specs())
     messages: list[LlmMessage] = list(prompt.messages)
@@ -212,17 +246,20 @@ async def generate(
     for iteration in range(1, deps.max_iterations + 1):
         # Chan 4: ngan sach kiem tra lai MOI VONG, khong phai mot lan o stage truoc.
         if not await deps.rate_limit.within_daily_budget():
+            meter.reason = "budget"
             logger.warning("het ngan sach giua vong ReAct — dung lai", iteration=iteration)
             return _finish(last_text, logger, reason="budget", iteration=iteration)
 
         # Chan 3: deadline. Con qua it thoi gian thi dung, dung bat dau vong nua.
         if time.monotonic() > deadline:
+            meter.reason = "deadline"
             logger.warning("het deadline ReAct", iteration=iteration)
             return _finish(last_text, logger, reason="deadline", iteration=iteration)
 
         # Chan 6: nguoi dung bam dung. Kiem o dau vong chu khong giua mot loi goi —
         # huy nua chung mot request van bi tinh tien ma khong duoc gi.
         if deps.should_stop is not None and await deps.should_stop():
+            meter.reason = "user_stopped"
             logger.info("nguoi dung dung vong ReAct", iteration=iteration)
             return _finish(last_text, logger, reason="user_stopped", iteration=iteration)
 
@@ -233,6 +270,7 @@ async def generate(
         offer_tools = bool(specs) and not last_iteration
 
         try:
+            meter.iterations += 1
             result = await deps.llm.reply(
                 system=prompt.system,
                 messages=tuple(messages),
@@ -257,12 +295,7 @@ async def generate(
             #
             # Khong chan o vong cuoi: luc do khong con vong nao de doc ket qua tra ve,
             # nen nhac chi to phi mot luot goi model va van ra dung cau tra loi do.
-            if (
-                co_cong_cu_tai_lieu
-                and not da_tra_tai_lieu
-                and not da_nhac
-                and not last_iteration
-            ):
+            if co_cong_cu_tai_lieu and not da_tra_tai_lieu and not da_nhac and not last_iteration:
                 da_nhac = True
                 logger.info(
                     "chua tra tai lieu ma da dinh tra loi — nhac mot lan",
@@ -278,6 +311,7 @@ async def generate(
                 tool_calls_used=tool_calls_used,
                 da_tra_tai_lieu=da_tra_tai_lieu,
             )
+            meter.reason = "answer"
             return Ok(result.text)
 
         # --- Co loi goi cong cu: Action ---
@@ -285,12 +319,16 @@ async def generate(
         # ma khong bao no biet.
         calls = result.tool_calls
         tool_calls_used += len(calls)
+        meter.tool_calls += len(calls)
         if any(c.name == _CONG_CU_TAI_LIEU for c in calls):
             da_tra_tai_lieu = True
 
         if deps.on_event is not None:
             if result.text:
-                deps.on_event(ThoughtEvent(iteration=iteration, text=result.text))
+                # Progress is user-visible too; raw model text must not bypass final rails.
+                deps.on_event(
+                    ThoughtEvent(iteration=iteration, text=kiem_dau_ra(result.text).text)
+                )
             deps.on_event(ToolCallEvent(iteration=iteration, tools=tuple(c.name for c in calls)))
 
         # Luot assistant phai mang DUNG cac tool call, neu khong ket qua se khong khop.
@@ -298,7 +336,10 @@ async def generate(
 
         # --- Observation: chay SONG SONG, tra ve DU so ket qua ---
         observations = await deps.tools.call_many(calls, ctx)
+        meter.tool_errors += sum(not obs.ok for obs in observations)
         for obs in observations:
+            if obs.ok and obs.evidence is not None:
+                meter.retrieved_chunks += len(obs.evidence)
             if deps.on_event is not None:
                 deps.on_event(
                     ObservationEvent(
@@ -311,4 +352,5 @@ async def generate(
 
     # Chan 1: het so vong.
     logger.warning("het so vong ReAct", tool_calls_used=tool_calls_used)
+    meter.reason = "max_iterations"
     return _finish(last_text, logger, reason="max_iterations", iteration=deps.max_iterations)

@@ -58,12 +58,10 @@ Chỉ xuất ra đúng một con số. Không giải thích.
 _SCORE = re.compile(r"[01](?:[.,]\d+)?")
 
 
-async def judge_faithfulness(question: str, answer: str, context: str, trace_id: str) -> float:
-    """0.0 - 1.0. Nguoi cham khong doc duoc thi tra ve 0.0, khong phai bo qua.
-
-    Bo qua mot cau khong cham duoc se lam diem trung binh DEP LEN mot cach gia tao:
-    dung nhung cau kho nhat lai la nhung cau nguoi cham hay tra ve rac.
-    """
+async def judge_faithfulness(
+    question: str, answer: str, context: str, trace_id: str
+) -> float | None:
+    """Unknown judgment remains None; the runner must fail its required measurement."""
     raw = await llm.cheap(
         system=JUDGE_INSTRUCTION,
         input=f"TÀI LIỆU:\n{context}\n\nCÂU HỎI:\n{question}\n\nCÂU TRẢ LỜI:\n{answer}",
@@ -75,7 +73,8 @@ async def judge_faithfulness(question: str, answer: str, context: str, trace_id:
             trace_id=trace_id,
         ),
     )
-    match = _SCORE.search(raw.strip())
+    match = _SCORE.fullmatch(raw.strip())
     if match is None:
-        return 0.0
-    return min(1.0, max(0.0, float(match.group().replace(",", "."))))
+        return None
+    score = float(match.group().replace(",", "."))
+    return score if 0 <= score <= 1 else None

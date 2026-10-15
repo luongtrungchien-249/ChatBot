@@ -8,10 +8,28 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 
+from ..domain.errors import BotError
 from ..domain.message import StoredMessage
 from ..domain.thread import ThreadScope
 
 FactSource = Literal["explicit", "implicit"]
+DeleteMode = Literal["conversation", "all_data"]
+
+
+class MemoryUnavailableError(RuntimeError):
+    """Typed port failure: semantic memory cannot safely serve this request."""
+
+    def __init__(self, message: str, bot_error: BotError) -> None:
+        super().__init__(message)
+        self.bot_error = bot_error
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteReport:
+    messages: int
+    summaries: int
+    facts: int
+    metadata: int
 
 
 @dataclass(frozen=True, slots=True)

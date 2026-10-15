@@ -1,5 +1,41 @@
 # Cấu trúc dự án — AI Chatbot Zalo
 
+> Cập nhật tiếp 15/10/2026: [báo cáo](docs/execution-2026-10-15.md).
+> Migration `0027` thêm audit rebuild vector cuối trong row fact. CLI recovery ở
+> `main/memory_embeddings.py`, SQL trong `memory/repository/embedding_rebuild.py`;
+> target là identity hiện tại, manifest exact snapshot, dry-run mặc định. Apply embed
+> ngoài transaction rồi kiểm lại scope/snapshot dưới lock, không sửa content/lifecycle.
+> Restore legacy có explicit override và CI synthetic PG16; chưa nghiệm thu production.
+
+> Cập nhật triển khai 13/10/2026: xem [báo cáo thực thi](docs/execution-2026-10-13.md)
+> và [runbook](docs/runbook.md). Các phép đo trong phần thiết kế dưới đây có ngày riêng;
+> không dùng chúng làm trạng thái production hiện tại.
+
+Hợp đồng hiện hành: Web dev chỉ loopback; production dùng proxy OIDC ký request v2,
+owner ACL và nonce Redis. API chỉ nhận/enqueue, worker giữ lifecycle lock/generation;
+xoá conversation giữ fact explicit, all-data xoá fact, cả hai giữ ownership/tombstone.
+SSE có cache final 300 giây, replay sau subscribe, dedupe theo reply ID và đọc lại
+history khi final đã hết TTL. Cache chứa văn bản đã qua output guard và được xoá cùng thread.
+
+Document/fact lưu embedding identity (provider, model, dimension, revision). Legacy NULL
+không được suy đoán thành model hiện tại. Retrieval/semantic memory từ chối unknown/mismatch;
+audit và quản trị vẫn chạy. Ingest thêm immutable version khi nội dung hoặc identity đổi.
+Fact gần nhau theo cosine không còn tự ghi đè; chỉ normalized exact duplicate được bỏ qua.
+Thay thế fact cần thao tác explicit, đúng scope/subject và transaction.
+
+Poetry có deadline/stop/budget checkpoint, lưu đúng final đã gửi và đo riêng số lần gọi.
+ReAct có typed retrieval evidence để đo Recall/scope/version và ghi nhận thiếu citation;
+số chunk đã truy xuất không chứng minh câu trả lời có trích dẫn hay grounded.
+Kế toán PostgreSQL/Redis hoạt động độc lập khi một sink lỗi. `DAILY_BUDGET_USD` là ngưỡng
+kiểm tra chi tiêu đã ghi nhận, chưa có reservation cho request đang bay/các process đồng thời.
+
+Migration hiện hành `0001`–`0027`; `0022/0024` provenance, `0023` poetry calls,
+`0025` audit gán owner legacy, `0026` sửa restore `vn_tsv` với search_path hạn chế,
+`0027` audit rebuild vector cuối trong fact row.
+Voyage adapter đã có nhưng chọn provider/threshold production
+chưa nghiệm thu. Dashboard có 19 panel, Prometheus có 14 rule và Alertmanager forwarding;
+notification thật, E3/E4/E7 và Gate A/B/C còn thiếu bằng chứng. RLVR/E8 chưa được mở.
+
 **Vai trò:** Senior AI Engineer
 **Trạng thái:** Bản chốt để thi công. Thay thế phần "kiến trúc" đang rải rác trong 3 file kế hoạch.
 **Phạm vi (07/09/2026):** chỉ tích hợp **Zalo**. Messenger đã bị bỏ — không còn code, biến cấu hình hay giá trị `Platform` nào cho nó. Xem `docs/plan-thi-cong.md` §7.
@@ -871,8 +907,8 @@ DATABASE_URL=postgres://...
 REDIS_URL=redis://...
 
 ZALO_BOT_TOKEN=                # dạng numeric_id:secret
-ZALO_MODE=webhook              # webhook | polling
-ZALO_WEBHOOK_SECRET=           # đường dẫn bí mật + shared token
+ZALO_MODE=polling              # webhook bị schema từ chối tới khi có signature contract
+ZALO_POLLING_EXPECTED=false    # bật true khi triển khai poller với token đã xác minh
 
 BOT_MENTION_NAME=nam_chatbot
 GROUP_POLICY=allowlist         # allowlist | open | disabled
@@ -896,5 +932,5 @@ Ghi ra để sau này không ai tưởng là quên:
 - **Không xử lý `attachments`.** Trường này có trong contract của plan nhưng không nơi nào trong 3 file định nghĩa hành vi. Giữ trường lại, hành vi Phase 1 là: bỏ qua và trả lời "mình chưa xem được ảnh". Không để trường chết.
 - **Chưa có `zalo-personal/`.** Chỉ tạo thư mục khi Bot Platform thật sự không đáp ứng được nhóm. Tạo sớm là mời gọi dùng sớm.
 - **Không có Messenger.** Bỏ khỏi phạm vi 07/09/2026 theo quyết định của chủ dự án. Đã dọn sạch chứ không để lại gói rỗng: một placeholder không ai xoá sẽ được người đọc sau hiểu là "sắp làm".
-- **Không có Grafana dashboard.** `/api/metrics` đã phơi bày đủ số liệu ở định dạng Prometheus; dựng dashboard là việc cấu hình, không phải việc code, và làm được bất cứ lúc nào.
+- **Grafana/Prometheus là cấu hình vận hành.** Dashboard hiện có 19 panel; metrics token, profile app/monitoring và mật khẩu Grafana phải được cấu hình theo runbook. Notification dùng profile alerts riêng và cần nghiệm thu receiver thật.
 - **Không đếm token thật khi cắt ngữ cảnh.** `budget.py` ước bằng tỉ lệ ký tự/token đo được (3,6). Đếm thật đòi `agents/` gọi ra ngoài — vi phạm L1 — và thêm một vòng mạng cho mỗi tầng của mỗi câu trả lời.
