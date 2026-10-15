@@ -107,6 +107,9 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check .
 
+      - name: Web final replay and acknowledgement races
+        run: node --test tests/web_sse_recovery.test.cjs
+
       # L1-L8: 8 luat kien truc trong ARCHITECTURE.md section 1.
       # Cuong che bang may, khong bang niem tin.
       - name: Luat kien truc
@@ -138,4 +141,33 @@ jobs:
           uv run python -m main.cli migrate
 
       - name: Test — unit, contract, integration, security
-        run: uv run pytest
+        run: uv run pytest --junitxml=test-results.xml
+
+      - name: PG16 synthetic legacy archive recovery
+        run: uv run python ops/restore_smoke.py --execute-isolated --output restore-smoke.json
+
+      - name: Save restore verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-${{ github.sha }}
+          path: restore-smoke.json
+          if-no-files-found: warn
+
+      - name: Prometheus rules and alert firing boundaries
+        run: |
+          docker run --rm --network none --entrypoint promtool -v "$PWD/ops:/ops:ro" prom/prometheus:v3.1.0 check rules /ops/alert-rules.yml
+          docker run --rm --network none --entrypoint promtool -v "$PWD/ops:/ops:ro" prom/prometheus:v3.1.0 test rules /ops/alert-tests.yml
+
+      # Anh chup chi gom metadata va thong ke tong hop; script khong doc noi dung
+      # tin nhan/tai lieu va khong in secret. Luu artifact de moi commit co baseline
+      # tai tao duoc thay vi chep so bang tay vao tai lieu.
+      - name: Tao baseline van hanh
+        run: uv run python ops/baseline.py --junit test-results.xml > baseline.md
+
+      - name: Luu baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-${{ github.sha }}
+          path: baseline.md
+          if-no-files-found: error

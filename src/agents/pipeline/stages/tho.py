@@ -16,6 +16,11 @@ Luat tho duoc cuong che bang CODE trong `tho/luat.py`, khong bang cau chu trong 
 — xem docstring cua goi `tho` de biet vi sao.
 """
 
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from typing import Literal
+
 from tho.prompt import system_prompt
 from tho.quy_trinh import mot_dong
 from tho.sinh import KetQua, sinh_tho, tra_loi
@@ -23,6 +28,19 @@ from tho.y_dinh import YeuCauTho
 
 from ...ports.llm import CallContext, LlmPort, UserMessage
 from ...ports.logger import LoggerPort
+from .generate import _classify
+
+
+class PoetryStoppedError(Exception):
+    def __init__(self, reason: Literal["budget", "deadline", "user_stopped"]) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class PoetryUpstreamError(Exception):
+    def __init__(self, cause: Exception, logger: LoggerPort) -> None:
+        super().__init__(type(cause).__name__)
+        self.error = _classify(cause, logger)
 
 
 async def lam_tho(
@@ -32,44 +50,95 @@ async def lam_tho(
     max_tokens: int,
     ctx: CallContext,
     logger: LoggerPort,
+    deadline_ms: int = 90_000,
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
+    within_budget: Callable[[], Awaitable[bool]] | None = None,
+    on_calls: Callable[[int], None] | None = None,
 ) -> str:
     """Sinh bai tho, tra ve van ban da san sang gui cho nguoi dung."""
 
+    deadline = time.monotonic() + deadline_ms / 1_000
+    calls = 0
+    stop_reason: Literal["budget", "deadline", "user_stopped"] | None = None
+
+    async def checkpoint() -> None:
+        nonlocal stop_reason
+        if time.monotonic() >= deadline:
+            stop_reason = "deadline"
+            raise PoetryStoppedError("deadline")
+        if should_stop is not None and await should_stop():
+            stop_reason = "user_stopped"
+            raise PoetryStoppedError("user_stopped")
+        if within_budget is not None and not await within_budget():
+            stop_reason = "budget"
+            raise PoetryStoppedError("budget")
+
     async def goi_model(sys_prompt: str, luot: list[str]) -> str:
+        nonlocal calls
+        await checkpoint()
+        calls += 1
         # `effort` KHONG truyen o day. Lam tho la viec sinh, khong phai viec suy luan
         # nhieu buoc, va `llm/models.py` da ghi lai phep do 07/09: effort cao hon lam
         # moi lan goi lau hon ma khong tot hon. Muc tieu cua ca tinh nang nay la GIAM
         # do tre.
-        ket_qua = await llm.reply(
-            system=sys_prompt,
-            messages=tuple(UserMessage(content=x) for x in luot),
-            max_tokens=max_tokens,
-            effort="low",
-            ctx=ctx,
-            # Route RIENG: day la cho duy nhat co the tro sang model tu host ma khong
-            # keo theo ca bot. Chua cau hinh POEM_BASE_URL thi no dung model chung.
-            route="poem",
-        )
+        try:
+            ket_qua = await llm.reply(
+                system=sys_prompt,
+                messages=tuple(UserMessage(content=x) for x in luot),
+                max_tokens=max_tokens,
+                effort="low",
+                ctx=ctx,
+                route="poem",
+            )
+        except Exception as error:
+            raise PoetryUpstreamError(error, logger) from None
         return ket_qua.text
 
     async def cham_model(sys_prompt: str, luot: list[str]) -> str:
+        nonlocal calls
+        await checkpoint()
+        calls += 1
         # NGUOI CHAM di duong `cheap` route `summarize` — model KHAC model lam tho.
         #
         # Do 11/09/2026: dung chung `gpt-4o-mini` lam nguoi cham thi no khong phan
         # biet duoc bai nao hon bai nao (hai thiet ke prompt, mot cai cho 81% deu tay,
         # mot cai cho diem giong het nhau). Nguoi cham cua evals/ thi phan biet duoc,
         # va khac biet nam o dung cho nay. Xem `CHON_BANG_NGUOI_CHAM` trong tho/sinh.py.
-        return await llm.cheap(
-            system=sys_prompt,
-            input=luot[-1],
-            max_tokens=max_tokens,
-            route="summarize",
-            ctx=ctx,
-        )
+        try:
+            return await llm.cheap(
+                system=sys_prompt,
+                input=luot[-1],
+                max_tokens=max_tokens,
+                route="summarize",
+                ctx=ctx,
+            )
+        except Exception as error:
+            raise PoetryUpstreamError(error, logger) from None
 
-    ket_qua: KetQua = await sinh_tho(
-        yeu_cau.the_tho, yeu_cau.chu_de, goi_model, cham_model=cham_model
-    )
+    try:
+        await checkpoint()
+        async with asyncio.timeout(max(0.0, deadline - time.monotonic())):
+            ket_qua: KetQua = await sinh_tho(
+                yeu_cau.the_tho, yeu_cau.chu_de, goi_model, cham_model=cham_model
+            )
+        # Candidate/judge recovery may catch callback errors; a control stop must
+        # still stop the turn even when another candidate survived.
+        if stop_reason is not None:
+            raise PoetryStoppedError(stop_reason)
+        if should_stop is not None and await should_stop():
+            raise PoetryStoppedError("user_stopped")
+    except TimeoutError:
+        raise PoetryStoppedError("deadline") from None
+    except PoetryUpstreamError:
+        if stop_reason is not None:
+            raise PoetryStoppedError(stop_reason) from None
+        raise
+    finally:
+        if on_calls is not None:
+            try:
+                on_calls(calls)
+            except Exception as error:
+                logger.warning("poetry telemetry failed", error=type(error).__name__)
 
     # Ghi SO LAN GOI va SO LOI CON LAI: hai con so nay la thu duy nhat noi duoc tinh
     # nang nay dang ton bao nhieu do tre, va prompt co dang lam viec khong. Khong co

@@ -1,0 +1,137 @@
+groups:
+  - name: cp-runtime
+    rules:
+      - alert: CPWorkerHeartbeatMissing
+        expr: >-
+          (cp_heartbeat_age_seconds{component=~"worker|maintenance"} > 120)
+          or (cp_heartbeat_observed{component=~"worker|maintenance"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Expected worker heartbeat is missing or stale
+          runbook_url: /docs/runbook.md
+      # Polling expectation is explicit. Unknown heartbeat age is never zero:
+      # observed=0 means the expected process has not produced a valid heartbeat.
+      - alert: CPZaloHeartbeatMissing
+        expr: >-
+          ((cp_heartbeat_age_seconds{component="zalo"} > 120)
+          and on(instance,job,component) (cp_heartbeat_observed{component="zalo"} == 1)
+          or (cp_heartbeat_observed{component="zalo"} == 0))
+          and on(instance,job,component) (cp_process_expected{component="zalo"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Expected Zalo poller heartbeat is missing or stale
+          description: Provisional 120s threshold; verify polling token, backlog and network before restarting.
+          query: cp_heartbeat_observed{component="zalo"}; cp_heartbeat_age_seconds{component="zalo"}; cp_process_expected{component="zalo"}
+          runbook_url: /docs/runbook.md
+      - alert: CPReplyQueueBacklog
+        expr: cp_queue_depth{queue="reply"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Reply queue exceeds provisional capacity threshold
+          runbook_url: /docs/runbook.md
+      - alert: CPReplyQueueOld
+        expr: cp_queue_oldest_age_seconds{queue="reply"} > 120
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Oldest original reply enqueue exceeds provisional 120 seconds
+          runbook_url: /docs/runbook.md
+      - alert: CPQueueAgeUnavailable
+        expr: cp_queue_age_complete == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Queue age cannot be measured; check payload expiry and scrape limits
+          runbook_url: /docs/runbook.md
+      # Recorded daily spend gauges, not an invoice or a hard reservation cap.
+      # Thresholds/hold times are provisional pending an operational baseline.
+      # Missing/invalid denominators do not manufacture a zero budget fraction.
+      - alert: CPBudget70
+        expr: >-
+          (cp_budget_spent_usd / cp_budget_limit_usd >= 0.7)
+          and (cp_budget_spent_usd / cp_budget_limit_usd < 0.9)
+          and (cp_budget_limit_usd > 0)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Recorded daily spend has reached 70 percent of budget
+          description: Provisional warning threshold; inspect route costs and unrecorded provider usage.
+          query: cp_budget_spent_usd / cp_budget_limit_usd
+          runbook_url: /docs/runbook.md
+      - alert: CPBudget90
+        expr: >-
+          (cp_budget_spent_usd / cp_budget_limit_usd >= 0.9)
+          and (cp_budget_limit_usd > 0)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Recorded daily spend has reached 90 percent of budget
+          description: Provisional critical threshold; restrict traffic and check usage before increasing budget.
+          query: cp_budget_spent_usd / cp_budget_limit_usd
+          runbook_url: /docs/runbook.md
+      - alert: CPRuntimeErrorRateHigh
+        expr: (sum(cp_runtime_turns{outcome="error"}) / clamp_min(sum(cp_runtime_turns), 1) > 0.1) and (sum(cp_runtime_turns) >= 20)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Worker error ratio exceeds provisional 10 percent threshold over 5 minutes
+          runbook_url: /docs/runbook.md
+      - alert: CPRuntimeLatencyHigh
+        expr: cp_runtime_turn_latency_p95_ms{outcome="completed"} > 30000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Worker p95 exceeds provisional 30 second threshold over 5 minutes
+          runbook_url: /docs/runbook.md
+      - alert: CPMetricsScrapeUnavailable
+        expr: up{job="cp-assistant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: API metrics scrape failed; check API health and scrape credential
+          runbook_url: /docs/runbook.md
+      - alert: CPFallbackRateHigh
+        expr: (cp_runtime_fallbacks / clamp_min(cp_runtime_measured_replies, 1) > 0.1) and (cp_runtime_measured_replies >= 20)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Sent fallback ratio exceeds provisional 10 percent threshold over 5 minutes
+          runbook_url: /docs/runbook.md
+      - alert: CPRagEmptyRateHigh
+        expr: (sum(cp_rag_requests{outcome=~"empty|filtered"}) / clamp_min(sum(cp_rag_requests{outcome=~"found|empty|filtered|uncertain"}), 1) > 0.5) and (sum(cp_rag_requests{outcome=~"found|empty|filtered|uncertain"}) >= 20)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG no-result ratio exceeds provisional 50 percent threshold over 5 minutes
+          runbook_url: /docs/runbook.md
+      - alert: CPRagErrorRateHigh
+        expr: (sum(cp_rag_requests{outcome="error"}) / clamp_min(sum(cp_rag_requests{outcome!~"cancelled|unknown"}), 1) > 0.1) and (sum(cp_rag_requests{outcome!~"cancelled|unknown"}) >= 20)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG tool error ratio exceeds provisional 10 percent threshold over 5 minutes
+          runbook_url: /docs/runbook.md
+      - alert: CPRagDegradedRateHigh
+        expr: (sum(cp_rag_degraded_requests{stage="any"}) / clamp_min(sum(cp_rag_requests{outcome!~"cancelled|unknown"}), 1) > 0.1) and (sum(cp_rag_requests{outcome!~"cancelled|unknown"}) >= 20)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG degradation ratio exceeds provisional 10 percent threshold over 5 minutes
+          runbook_url: /docs/runbook.md

@@ -70,6 +70,8 @@ def doc_phan_quyet(raw: str, so_y: int) -> list[bool] | None:
     for khop in _PHAN_QUYET.finditer(raw):
         so = int(khop.group(1))
         if 1 <= so <= so_y:
+            if so in thay:
+                return None
             thay[so] = khop.group(2).upper() == "CO"
     # Doi DU. Thieu mot dong nghia la nguoi cham bo qua mot y, va doan lay phan con
     # lai se cho ra mot con so trong nhu that.

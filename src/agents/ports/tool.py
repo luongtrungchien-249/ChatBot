@@ -12,6 +12,7 @@ implementation ra doc.
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ..domain.knowledge import RetrievalEvidence
 from .llm import CallContext, ToolCall, ToolSpec
 
 
@@ -45,6 +46,8 @@ class ToolResult:
     ok: bool
     #: Cong cu chay het bao lau — de biet cong cu nao dang keo p95 len.
     latency_ms: int
+    #: None = not measured/not applicable; () = measured retrieval with no sources.
+    evidence: tuple[RetrievalEvidence, ...] | None = None
 
 
 class ToolPort(Protocol):

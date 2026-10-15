@@ -10,6 +10,7 @@ import pytest
 from agents.domain.knowledge import RetrievedChunk
 from agents.domain.thread import ThreadScope
 from agents.ports.llm import CallContext
+from knowledge.retrieve.service import RetrievalResult
 from tools import knowledge_search
 from tools.knowledge_search import (
     KNOWLEDGE_SEARCH_DEFINITION,
@@ -21,9 +22,7 @@ from tools.knowledge_search import (
 da_goi: list[tuple[str, int]] = []
 
 #: Pham vi di cung moi lan goi cong cu, y het hop dong cua memory_fact.
-CTX = CallContext(
-    scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr"
-)
+CTX = CallContext(scope=ThreadScope(platform="cli", thread_id="t1"), sender_id="u1", trace_id="tr")
 
 
 def chunk(
@@ -51,12 +50,10 @@ def kho(monkeypatch: pytest.MonkeyPatch) -> list[RetrievedChunk]:
     da_goi.clear()
 
     class KhoGia:
-        async def search(
-            self, scope: ThreadScope, query: str, k: int
-        ) -> list[RetrievedChunk]:
+        async def search_detailed(self, scope: ThreadScope, query: str, k: int) -> RetrievalResult:
             # Ghi lai de test kiem duoc lan tra SAU co doi truy van va noi rong k khong.
             da_goi.append((query, k))
-            return ket_qua
+            return RetrievalResult(ket_qua)
 
     import knowledge.retrieve.service as service
 
@@ -146,7 +143,7 @@ class TestBatGoiCongCu:
         assert self.mo_ta.index("GỌI CÔNG CỤ NÀY TRƯỚC KHI TRẢ LỜI") < 200
 
     async def test_KHONG_buoc_dieu_kien_theo_su_tu_tin_cua_model(self) -> None:
-        """"ke ca cau ban nghi minh da biet dap an" tu vo hieu dung luc can nhat."""
+        """ "ke ca cau ban nghi minh da biet dap an" tu vo hieu dung luc can nhat."""
         assert "Không có ngoại lệ" in self.mo_ta
         assert "giống kiến thức phổ thông" in self.mo_ta
 
@@ -299,9 +296,7 @@ class TestNguoiTrongVongLap:
     Nguong 0,50 (RAG_HOI_LAI_TU) nam trong khoang trong 0,466-0,506 cua mau nay.
     """
 
-    async def test_CHAC_thi_tra_ve_noi_dung_chu_KHONG_hoi(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_CHAC_thi_tra_ve_noi_dung_chu_KHONG_hoi(self, kho: list[RetrievedChunk]) -> None:
         """Duong thuong phai khong doi. Hoi lai khi da chac la mot luot lang phi."""
         kho.append(chunk("Don hoan tien xu ly trong 7 ngay.", distance=0.21))
         kho.append(chunk("Muc khac.", section="Doi tra", distance=0.30, chunk_id="2"))
@@ -388,9 +383,7 @@ class TestHaiNhanhCuaDanhSachHoiLai:
 
         assert "KHÔNG kèm trích đoạn" in out
 
-    async def test_ca_hai_nhanh_deu_cam_tra_loi_tu_tri_nho(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_ca_hai_nhanh_deu_cam_tra_loi_tu_tri_nho(self, kho: list[RetrievedChunk]) -> None:
         """Nhanh CO mo duong cho model tra loi — khong duoc de no thanh duong tat ve
         lai viec tra loi tu tri nho.
         """
@@ -401,9 +394,7 @@ class TestHaiNhanhCuaDanhSachHoiLai:
 
         assert "KHÔNG được trả lời từ trí nhớ" in out
 
-    async def test_luon_co_dong_KHAC_o_cuoi_danh_sach(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_luon_co_dong_KHAC_o_cuoi_danh_sach(self, kho: list[RetrievedChunk]) -> None:
         """Danh sach khong co duong ra la mot cai bay: nguoi dung buoc phai chon mot
         muc sai roi nhan ve mot cau tra loi sai mot cach tu tin hon truoc.
         """
@@ -443,9 +434,7 @@ class TestHaiNhanhCuaDanhSachHoiLai:
         assert "1. Muc duy nhat" in out
         assert "2. Khác — không phải mục nào ở trên" in out
 
-    async def test_gom_ung_vien_RONG_hon_khi_phai_hoi(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_gom_ung_vien_RONG_hon_khi_phai_hoi(self, kho: list[RetrievedChunk]) -> None:
         """Top-5 cua mot truy van mo ho thuong bo sot dung thu nguoi dung dinh hoi.
         Do that: "dishes that use cheese and pasta" o k=5 cho 5 muc khong co dap an
         nao, o k=12 keo duoc CA HAI dap an dung vao danh sach.
@@ -458,18 +447,14 @@ class TestHaiNhanhCuaDanhSachHoiLai:
         # Lan dau k=5 de do do chac, lan hai k rong hon de dung danh sach.
         assert [k for _, k in da_goi] == [5, 12]
 
-    async def test_KHONG_biet_khoang_cach_thi_KHONG_hoi(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
-        """"Khong biet" khong duoc bien thanh "khong chac"."""
+    async def test_KHONG_biet_khoang_cach_thi_KHONG_hoi(self, kho: list[RetrievedChunk]) -> None:
+        """ "Khong biet" khong duoc bien thanh "khong chac"."""
         kho.append(chunk("A", section="Muc mot", distance=None))
         kho.append(chunk("B", section="Muc hai", distance=None, chunk_id="2"))
 
         assert "KẾT QUẢ KHÔNG CHẮC" not in await run_knowledge_search({"query": "x"}, CTX)
 
-    async def test_da_chon_thi_TRA_SAU_va_KHONG_hoi_lai(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_da_chon_thi_TRA_SAU_va_KHONG_hoi_lai(self, kho: list[RetrievedChunk]) -> None:
         """Hoi hai luot lien tiep la dung cai vong lap ma luat 07/09 dung len de chan.
 
         Nen o duong `chon`, du khoang cach co xa den may cung KHONG duoc hoi nua.
@@ -496,7 +481,7 @@ class TestHaiNhanhCuaDanhSachHoiLai:
     async def test_chon_KHAC_thi_KHONG_nhet_chu_khac_vao_truy_van(
         self, kho: list[RetrievedChunk]
     ) -> None:
-        """"Khac" la mot loi PHU DINH, khong phai mot tu khoa. Nhet no vao truy van la
+        """ "Khac" la mot loi PHU DINH, khong phai mot tu khoa. Nhet no vao truy van la
         di tim tai lieu noi ve chu "khac".
         """
         kho.append(chunk("Noi dung", distance=0.2))
@@ -514,9 +499,7 @@ class TestHaiNhanhCuaDanhSachHoiLai:
             await run_knowledge_search({"query": "q", "chon": cach_go}, CTX)
             assert da_goi[-1][0] == "q", cach_go
 
-    async def test_chon_rong_thi_coi_nhu_khong_chon(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_chon_rong_thi_coi_nhu_khong_chon(self, kho: list[RetrievedChunk]) -> None:
         """Model tra ve chuoi rong la chuyen co that. Coi do la "da chon" thi lan tim
         chung chung se khong bao gio hoi nua, va tinh nang tu tat mot cach im lang.
         """
@@ -582,9 +565,7 @@ class TestKetQua:
         assert "ĐỪNG tra web" in out
         assert "quy định riêng" in out
 
-    async def test_CHO_PHEP_tra_web_cho_kien_thuc_chung(
-        self, kho: list[RetrievedChunk]
-    ) -> None:
+    async def test_CHO_PHEP_tra_web_cho_kien_thuc_chung(self, kho: list[RetrievedChunk]) -> None:
         out = await run_knowledge_search({"query": "cach lam bun cha"}, CTX)
 
         assert "web_search" in out

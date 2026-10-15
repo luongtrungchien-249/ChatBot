@@ -29,7 +29,7 @@ async def respond(
     logger: LoggerPort | None = None,
     van_ban_nguoi_dung: str = "",
     co_tai_lieu: bool = False,
-) -> None:
+) -> str:
     verdict = kiem_dau_ra(
         text, van_ban_nguoi_dung=van_ban_nguoi_dung, co_tai_lieu=co_tai_lieu
     )
@@ -54,3 +54,5 @@ async def respond(
         logger.warning("tra loi co tai lieu nhung khong neu nguon nao")
 
     await channel.send(scope, verdict.text, reply_to)
+    # Persist exactly the public text; callers must never store the raw model output.
+    return verdict.text

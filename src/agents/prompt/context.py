@@ -103,7 +103,7 @@ def conversation_turns(
     giu: list[StoredMessage] = []
     for item in reversed(items):
         total += len(item.text) + len(item.sender_name) + 4
-        if total > limit and giu:
+        if total > limit:
             break
         giu.append(item)
     giu.reverse()

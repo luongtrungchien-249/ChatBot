@@ -20,7 +20,8 @@ class TestModelConfig:
     async def test_mac_dinh_van_la_endpoint_cua_OpenAI(self) -> None:
         """Khong cau hinh gi thi khong duoc doi hanh vi cua ca bot."""
         assert MODELS["reply"].base_url is None
-        assert MODELS["reply"].effort == "low"
+        assert MODELS["reply"].id == "gpt-4o-mini"
+        assert MODELS["reply"].effort is None
 
     async def test_route_poem_KHONG_nam_trong_dict_tinh(self) -> None:
         """Hoi quy that ma test nay chan.
@@ -211,4 +212,4 @@ class TestChonModelChoRouteTho:
 
         get_settings.cache_clear()
 
-        assert model_cho("poem").id == "gpt-5-mini"
+        assert model_cho("poem").id == "gpt-4o-mini"

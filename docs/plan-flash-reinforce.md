@@ -1,5 +1,10 @@
 # FlashREINFORCE cho RLVR thơ — plan thi công
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 16/09/2026. Trạng thái: **chưa thi công**.
 >
 > Yêu cầu: thay GRPO bằng **FlashREINFORCE** — ba cơ chế: One-Batch REINFORCE với

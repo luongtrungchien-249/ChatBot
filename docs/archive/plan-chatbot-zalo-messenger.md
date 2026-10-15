@@ -1,5 +1,10 @@
 # Kế hoạch triển khai AI Chatbot cho Zalo & Messenger
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](../Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](../status.md), [execution report](../execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > **Tài liệu lưu trữ — giữ nguyên như lúc viết, không sửa theo hiện trạng.**
 > Bản này ra đời trước khi dự án chốt kiến trúc và trước khi chuyển sang Python; phần stack, tên file
 > và ước lượng chi phí trong đây **đã lỗi thời**. Nó được giữ lại để tra cứu *lập luận* đã dẫn tới các

@@ -59,22 +59,33 @@ class TestGhiVaDoc:
         facts = await fact_repo.list_facts(thread, NAM)
         assert len(facts) == 2
 
-    async def test_cung_mot_y_khac_cach_noi_thi_THAY_THE_chu_khong_cong_don(
+    async def test_paraphrase_khac_chu_duoc_giu_khi_chua_co_update_ro_rang(
         self, thread: ThreadScope
     ) -> None:
         await nho(thread, NAM, "Nam làm backend Node.js")
         await nho(thread, NAM, "Nam phụ trách phần backend")
 
         facts = await fact_repo.list_facts(thread, NAM)
-        assert len(facts) == 1
-        assert facts[0].content == "Nam phụ trách phần backend"
+        assert {fact.content for fact in facts} == {
+            "Nam làm backend Node.js", "Nam phụ trách phần backend"
+        }
 
-    async def test_y_MAU_THUAN_thi_ban_moi_thang(self, thread: ThreadScope) -> None:
+    async def test_gan_nghia_khong_du_de_ket_luan_mau_thuan(self, thread: ThreadScope) -> None:
         await nho(thread, NAM, "Nam làm ở công ty A")
         await nho(thread, NAM, "Nam làm ở công ty B")
 
         facts = await fact_repo.list_facts(thread, NAM)
-        assert [f.content for f in facts] == ["Nam làm ở công ty B"]
+        assert {fact.content for fact in facts} == {"Nam làm ở công ty A", "Nam làm ở công ty B"}
+
+    async def test_thay_the_ID_ro_rang_thi_ban_moi_thang(self, thread: ThreadScope) -> None:
+        await nho(thread, NAM, "Nam làm ở công ty A")
+        old = (await fact_repo.list_facts(thread, NAM))[0]
+        await fact_repo.replace_fact(
+            thread, fact_repo.new_fact(NAM, "Nam làm ở công ty B", created_by="nam"), old.id
+        )
+        assert [fact.content for fact in await fact_repo.list_facts(thread, NAM)] == [
+            "Nam làm ở công ty B"
+        ]
 
     async def test_chep_y_HET_thi_bo_qua_khong_tao_ban_moi(self, thread: ThreadScope) -> None:
         await nho(thread, NAM, "Nam làm backend Node.js")

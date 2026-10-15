@@ -1,0 +1,441 @@
+rule_files:
+  - alert-rules.yml
+evaluation_interval: 1m
+tests:
+  # App deployment expects both workers even before their first valid heartbeat.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_heartbeat_observed{component="worker"}', values: '0+0x6'}
+      - {series: 'cp_heartbeat_observed{component="maintenance"}', values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: CPWorkerHeartbeatMissing, exp_alerts: []}
+      - eval_time: 3m
+        alertname: CPWorkerHeartbeatMissing
+        exp_alerts:
+          - exp_labels: {component: worker, severity: critical}
+            exp_annotations:
+              summary: Expected worker heartbeat is missing or stale
+              runbook_url: /docs/runbook.md
+          - exp_labels: {component: maintenance, severity: critical}
+            exp_annotations:
+              summary: Expected worker heartbeat is missing or stale
+              runbook_url: /docs/runbook.md
+  # Malformed Redis timestamps render observed=0 with no manufactured age sample.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_heartbeat_observed{component="worker"}', values: '0+0x6'}
+      - {series: 'cp_heartbeat_observed{component="maintenance"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="maintenance"}', values: '120+0x6'}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CPWorkerHeartbeatMissing
+        exp_alerts:
+          - exp_labels: {component: worker, severity: critical}
+            exp_annotations:
+              summary: Expected worker heartbeat is missing or stale
+              runbook_url: /docs/runbook.md
+  # Exact age boundary is not stale; measured age just above it is.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_heartbeat_observed{component="worker"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="worker"}', values: '120+0x6'}
+      - {series: 'cp_heartbeat_observed{component="maintenance"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="maintenance"}', values: '121+0x6'}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CPWorkerHeartbeatMissing
+        exp_alerts:
+          - exp_labels: {component: maintenance, severity: critical}
+            exp_annotations:
+              summary: Expected worker heartbeat is missing or stale
+              runbook_url: /docs/runbook.md
+  # Budget holds at exact 70/90 boundaries, warning suppression at critical,
+  # and resolution across the local-day reset. Ratio has no clamp/or-zero fallback.
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '0.69 0.7 0.7 0.7 0.9 0.9 1 0'}
+      - {series: cp_budget_limit_usd, values: '1+0x8'}
+    alert_rule_test:
+      - {eval_time: 0m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 1m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 2m, alertname: CPBudget70, exp_alerts: []}
+      - eval_time: 3m
+        alertname: CPBudget70
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Recorded daily spend has reached 70 percent of budget
+              description: Provisional warning threshold; inspect route costs and unrecorded provider usage.
+              query: cp_budget_spent_usd / cp_budget_limit_usd
+              runbook_url: /docs/runbook.md
+      - {eval_time: 4m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 4m, alertname: CPBudget90, exp_alerts: []}
+      - eval_time: 5m
+        alertname: CPBudget90
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: Recorded daily spend has reached 90 percent of budget
+              description: Provisional critical threshold; restrict traffic and check usage before increasing budget.
+              query: cp_budget_spent_usd / cp_budget_limit_usd
+              runbook_url: /docs/runbook.md
+      - {eval_time: 7m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 7m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '80+0x6'}
+      - {series: cp_budget_limit_usd, values: '100+0x6'}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CPBudget70
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Recorded daily spend has reached 70 percent of budget
+              description: Provisional warning threshold; inspect route costs and unrecorded provider usage.
+              query: cp_budget_spent_usd / cp_budget_limit_usd
+              runbook_url: /docs/runbook.md
+      - {eval_time: 3m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '1+0x6'}
+      - {series: cp_budget_limit_usd, values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '0+0x6'}
+      - {series: cp_budget_limit_usd, values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '-1+0x6'}
+      - {series: cp_budget_limit_usd, values: '-1+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_spent_usd, values: '1+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: cp_budget_limit_usd, values: '1+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPBudget70, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+  # Expected+measured stale Zalo heartbeat: pending then firing; exact 120 is healthy.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo",instance="test",job="cp-assistant"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_observed{component="zalo",instance="test",job="cp-assistant"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="zalo",instance="test",job="cp-assistant"}', values: '120 121 181 241 0 0 0'}
+    alert_rule_test:
+      - {eval_time: 0m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+      - {eval_time: 1m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+      - {eval_time: 2m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+      - eval_time: 3m
+        alertname: CPZaloHeartbeatMissing
+        exp_alerts:
+          - exp_labels: {component: zalo, instance: test, job: cp-assistant, severity: critical}
+            exp_annotations:
+              summary: Expected Zalo poller heartbeat is missing or stale
+              description: Provisional 120s threshold; verify polling token, backlog and network before restarting.
+              query: cp_heartbeat_observed{component="zalo"}; cp_heartbeat_age_seconds{component="zalo"}; cp_process_expected{component="zalo"}
+              runbook_url: /docs/runbook.md
+      - {eval_time: 4m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  # Missing observation has no age series; it is still an outage when explicitly expected.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo",instance="test",job="cp-assistant"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_observed{component="zalo",instance="test",job="cp-assistant"}', values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+      - eval_time: 3m
+        alertname: CPZaloHeartbeatMissing
+        exp_alerts:
+          - exp_labels: {component: zalo, instance: test, job: cp-assistant, severity: critical}
+            exp_annotations:
+              summary: Expected Zalo poller heartbeat is missing or stale
+              description: Provisional 120s threshold; verify polling token, backlog and network before restarting.
+              query: cp_heartbeat_observed{component="zalo"}; cp_heartbeat_age_seconds{component="zalo"}; cp_process_expected{component="zalo"}
+              runbook_url: /docs/runbook.md
+  # Disabled polling must not look like an outage, even with old/stale Redis state.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo"}', values: '0+0x6'}
+      - {series: 'cp_heartbeat_observed{component="zalo"}', values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo"}', values: '0+0x6'}
+      - {series: 'cp_heartbeat_observed{component="zalo"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="zalo"}', values: '999+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  # Unknown expectation/observation does not manufacture either enabled or age=0.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_heartbeat_observed{component="zalo"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="zalo"}', values: '999+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo"}', values: '1+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  # A stale process must not match a different scrape instance's expectation.
+  - interval: 1m
+    input_series:
+      - {series: 'cp_process_expected{component="zalo",instance="enabled",job="cp-assistant"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_observed{component="zalo",instance="other",job="cp-assistant"}', values: '1+0x6'}
+      - {series: 'cp_heartbeat_age_seconds{component="zalo",instance="other",job="cp-assistant"}', values: '999+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPZaloHeartbeatMissing, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_queue_oldest_age_seconds{queue="reply"}', values: '121+0x6'}
+      - {series: 'cp_queue_age_complete{queue="reply"}', values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: CPReplyQueueOld, exp_alerts: []}
+      - eval_time: 6m
+        alertname: CPReplyQueueOld
+        exp_alerts:
+          - exp_labels: {queue: reply, severity: critical}
+            exp_annotations:
+              summary: Oldest original reply enqueue exceeds provisional 120 seconds
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPQueueAgeUnavailable
+        exp_alerts:
+          - exp_labels: {queue: reply, severity: warning}
+            exp_annotations:
+              summary: Queue age cannot be measured; check payload expiry and scrape limits
+              runbook_url: /docs/runbook.md
+  - interval: 1m
+    input_series:
+      - {series: 'cp_queue_oldest_age_seconds{queue="reply"}', values: '120+0x6'}
+      - {series: 'cp_queue_age_complete{queue="reply"}', values: '1+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPReplyQueueOld, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPQueueAgeUnavailable, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - series: 'cp_heartbeat_age_seconds{component="worker"}'
+        values: '0 60 121 181 241 301'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CPWorkerHeartbeatMissing
+        exp_alerts:
+          - exp_labels:
+              component: worker
+              severity: critical
+            exp_annotations:
+              summary: Expected worker heartbeat is missing or stale
+              runbook_url: /docs/runbook.md
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_turns{outcome="error"}'
+        values: '5+0x10'
+      - series: 'cp_runtime_turns{outcome="completed"}'
+        values: '20+0x10'
+      - series: 'cp_runtime_turn_latency_p95_ms{outcome="completed"}'
+        values: '31000+0x10'
+      - series: 'cp_queue_depth{queue="reply"}'
+        values: '101+0x10'
+      - series: 'cp_budget_spent_usd'
+        values: '1+0x10'
+      - series: 'cp_budget_limit_usd'
+        values: '1+0x10'
+      - series: 'up{job="cp-assistant"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CPRuntimeErrorRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Worker error ratio exceeds provisional 10 percent threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPRuntimeLatencyHigh
+        exp_alerts:
+          - exp_labels: {outcome: completed, severity: warning}
+            exp_annotations:
+              summary: Worker p95 exceeds provisional 30 second threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPReplyQueueBacklog
+        exp_alerts:
+          - exp_labels: {queue: reply, severity: warning}
+            exp_annotations:
+              summary: Reply queue exceeds provisional capacity threshold
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPBudget90
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: Recorded daily spend has reached 90 percent of budget
+              description: Provisional critical threshold; restrict traffic and check usage before increasing budget.
+              query: cp_budget_spent_usd / cp_budget_limit_usd
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPMetricsScrapeUnavailable
+        exp_alerts:
+          - exp_labels: {job: cp-assistant, severity: critical}
+            exp_annotations:
+              summary: API metrics scrape failed; check API health and scrape credential
+              runbook_url: /docs/runbook.md
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_turns{outcome="error"}'
+        values: '1+0x10'
+      - series: 'cp_runtime_turns{outcome="completed"}'
+        values: '1+0x10'
+      - series: 'cp_runtime_turn_latency_p95_ms{outcome="completed"}'
+        values: '30000+0x10'
+      - series: 'cp_queue_depth{queue="reply"}'
+        values: '100+0x10'
+      - series: 'cp_budget_spent_usd'
+        values: '0.5+0x10'
+      - series: 'cp_budget_limit_usd'
+        values: '1+0x10'
+      - series: 'up{job="cp-assistant"}'
+        values: '1+0x10'
+      - series: 'cp_heartbeat_age_seconds{component="worker"}'
+        values: '30+0x10'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPRuntimeErrorRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRuntimeLatencyHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPReplyQueueBacklog, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPBudget90, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPMetricsScrapeUnavailable, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPWorkerHeartbeatMissing, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_fallbacks'
+        values: '3+0x6'
+      - series: 'cp_runtime_measured_replies'
+        values: '20+0x6'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: CPFallbackRateHigh
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: CPFallbackRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Sent fallback ratio exceeds provisional 10 percent threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_fallbacks'
+        values: '2+0x6'
+      - series: 'cp_runtime_measured_replies'
+        values: '20+0x6'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPFallbackRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_rag_requests{outcome="found"}', values: '5+0x6'}
+      - {series: 'cp_rag_requests{outcome="empty"}', values: '10+0x6'}
+      - {series: 'cp_rag_requests{outcome="filtered"}', values: '10+0x6'}
+      - {series: 'cp_rag_requests{outcome="uncertain"}', values: '0+0x6'}
+      - {series: 'cp_rag_requests{outcome="error"}', values: '5+0x6'}
+      - {series: 'cp_rag_requests{outcome="cancelled"}', values: '100+0x6'}
+      - {series: 'cp_rag_requests{outcome="unknown"}', values: '100+0x6'}
+      - {series: 'cp_rag_degraded_requests{stage="any"}', values: '4+0x6'}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: CPRagEmptyRateHigh, exp_alerts: []}
+      - {eval_time: 1m, alertname: CPRagErrorRateHigh, exp_alerts: []}
+      - {eval_time: 1m, alertname: CPRagDegradedRateHigh, exp_alerts: []}
+      - eval_time: 6m
+        alertname: CPRagEmptyRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: RAG no-result ratio exceeds provisional 50 percent threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPRagErrorRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: RAG tool error ratio exceeds provisional 10 percent threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+      - eval_time: 6m
+        alertname: CPRagDegradedRateHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: RAG degradation ratio exceeds provisional 10 percent threshold over 5 minutes
+              runbook_url: /docs/runbook.md
+  - interval: 1m
+    input_series:
+      - {series: 'cp_rag_requests{outcome="found"}', values: '10+0x6'}
+      - {series: 'cp_rag_requests{outcome="empty"}', values: '10+0x6'}
+      - {series: 'cp_rag_requests{outcome="error"}', values: '0+0x6'}
+      - {series: 'cp_rag_degraded_requests{stage="any"}', values: '2+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPRagEmptyRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagErrorRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagDegradedRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_rag_requests{outcome="found"}', values: '18+0x6'}
+      - {series: 'cp_rag_requests{outcome="empty"}', values: '0+0x6'}
+      - {series: 'cp_rag_requests{outcome="error"}', values: '2+0x6'}
+      - {series: 'cp_rag_degraded_requests{stage="any"}', values: '2+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPRagEmptyRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagErrorRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagDegradedRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_rag_requests{outcome="found"}', values: '1+0x6'}
+      - {series: 'cp_rag_requests{outcome="empty"}', values: '9+0x6'}
+      - {series: 'cp_rag_requests{outcome="error"}', values: '1+0x6'}
+      - {series: 'cp_rag_requests{outcome="cancelled"}', values: '100+0x6'}
+      - {series: 'cp_rag_requests{outcome="unknown"}', values: '100+0x6'}
+      - {series: 'cp_rag_degraded_requests{stage="any"}', values: '9+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPRagEmptyRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagErrorRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagDegradedRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - {series: 'cp_rag_requests{outcome="found"}', values: '0+0x6'}
+      - {series: 'cp_rag_requests{outcome="empty"}', values: '0+0x6'}
+      - {series: 'cp_rag_requests{outcome="error"}', values: '0+0x6'}
+      - {series: 'cp_rag_requests{outcome="cancelled"}', values: '100+0x6'}
+      - {series: 'cp_rag_requests{outcome="unknown"}', values: '100+0x6'}
+      - {series: 'cp_rag_degraded_requests{stage="any"}', values: '0+0x6'}
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPRagEmptyRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagErrorRateHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: CPRagDegradedRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_fallbacks'
+        values: '19+0x6'
+      - series: 'cp_runtime_measured_replies'
+        values: '19+0x6'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPFallbackRateHigh, exp_alerts: []}
+  - interval: 1m
+    input_series:
+      - series: 'cp_runtime_fallbacks'
+        values: '0+0x6'
+      - series: 'cp_runtime_measured_replies'
+        values: '0+0x6'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: CPFallbackRateHigh, exp_alerts: []}

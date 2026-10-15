@@ -1,5 +1,10 @@
 # Plan xây dựng CP Assistant — End-to-End
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Cập nhật 06/09/2026. Bản chính thức, nằm trong repo.
 > `ARCHITECTURE.md` trả lời *code nằm ở đâu, ai được gọi ai*. File này trả lời *xây theo thứ tự nào, xong thì biết bằng cách gì*.
 

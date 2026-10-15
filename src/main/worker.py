@@ -10,13 +10,18 @@ Chong trung va co "da tra loi" nam O DAY, khong o handle_message: chung la ha ta
 va pipeline phai test duoc ma khong can Redis.
 """
 
+import time
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from arq import Retry, cron
 
 from adapters.web.send import publish_progress, web_channel
 from adapters.zalo_bot.send import zalo_bot_channel
 from agents.domain.errors import is_retryable
 from agents.domain.message import scope_of
+from agents.domain.telemetry import TurnDetails
 from agents.domain.thread import Platform, ThreadScope
 from agents.pipeline.handle_message import Failed, Handled, handle_message
 from agents.ports.channel import ChannelPort
@@ -31,6 +36,8 @@ from infra.queue import (
     from_payload,
     redis_settings,
 )
+from infra.runtime_metrics import heartbeat, record_turn
+from infra.thread_lifecycle import ThreadBusyError, web_job_guard
 from memory.jobs.extract_facts import extract_facts
 from memory.jobs.summarize import summarize_thread
 
@@ -46,7 +53,58 @@ _CHANNELS: dict[Platform, ChannelPort] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class ReplyOutcome:
+    outcome: Literal["completed", "error"]
+    details: TurnDetails | None = None
+    replied: bool | None = None
+    retry_after: int | None = None
+
+
 async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
+    started = time.monotonic()
+    msg = from_payload(payload)
+    queue_wait = max(
+        0, int(time.time() * 1000) - int(payload.get("_enqueued_at_ms", time.time() * 1000))
+    )
+    outcome: Literal["completed", "error"] = "error"
+    measured: ReplyOutcome | None = ReplyOutcome("error")
+    try:
+        measured = await _handle_reply(ctx, payload)
+        if measured is None:
+            return
+        outcome = measured.outcome
+        if measured.retry_after is not None:
+            raise Retry(defer=measured.retry_after)
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        if measured is not None:
+            await record_turn(
+                msg.trace_id,
+                msg.platform,
+                outcome,
+                int((time.monotonic() - started) * 1000),
+                queue_wait,
+                details=measured.details,
+                replied=measured.replied,
+            )
+
+
+async def _handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> ReplyOutcome | None:
+    msg = from_payload(payload)
+    try:
+        async with web_job_guard(scope_of(msg), int(payload.get("_thread_generation", 0))) as valid:
+            if not valid:
+                _log.info("bo job cu sau xoa thread", trace_id=msg.trace_id)
+                return None
+            return await _process_reply(ctx, payload)
+    except ThreadBusyError:
+        raise Retry(defer=2) from None
+
+
+async def _process_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> ReplyOutcome | None:
     msg = from_payload(payload)
     log = _log.bind(trace_id=msg.trace_id)
 
@@ -58,7 +116,7 @@ async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     # max_tries = 3 chua bao gio thu lai lan nao.
     if await has_replied(msg.platform, msg.message_id):
         log.warning("da tra loi tin nay roi, bo qua lan retry")
-        return
+        return None
 
     # ARQ dem tu 1. Lan cuoi thi khong con co hoi nao nua, nen pipeline phai tra loi
     # nguoi dung ngay ca khi loi thuoc loai binh thuong se retry.
@@ -69,7 +127,7 @@ async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     if channel is None:
         # Khong nem loi: retry cung se that bai y het, chi ton them ba lan.
         log.error("chua co ChannelPort cho nen tang nay", platform=msg.platform)
-        return
+        return ReplyOutcome("error")
 
     scope = scope_of(msg)
     # Co huy phai xoa TRUOC khi chay: mot co sot lai tu cau truoc se huy oan cau nay.
@@ -78,9 +136,7 @@ async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     deps = await build_deps(channel, msg.platform)
     # Chi kenh web hien duoc tien do. Zalo khong co cho de ve.
     on_event = (
-        (lambda event: publish_progress(msg.thread_id, event))
-        if msg.platform == "web"
-        else None
+        (lambda event: publish_progress(msg.thread_id, event)) if msg.platform == "web" else None
     )
 
     result = await handle_message(
@@ -92,7 +148,7 @@ async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     if isinstance(result, Handled):
         if result.replied:
             await mark_replied(msg.platform, msg.message_id)
-        return
+        return ReplyOutcome("completed", result.telemetry, result.replied)
 
     assert isinstance(result, Failed)
     # Chi danh dau khi pipeline THAT SU da gui gi do. Chua gui thi de trong, de lan
@@ -100,13 +156,14 @@ async def handle_reply(ctx: dict[str, Any], payload: dict[str, Any]) -> None:
     if result.replied:
         await mark_replied(msg.platform, msg.message_id)
 
-    if is_retryable(result.error):
-        raise RuntimeError(
-            f"upstream loi, de hang doi retry (lan {job_try}/{WorkerSettings.max_tries}): "
-            f"{result.error}"
-        )
+    if is_retryable(result.error) and not result.replied and not is_final_attempt:
+        # ARQ does NOT retry an ordinary RuntimeError. Its explicit Retry signal
+        # preserves the queued job; max_tries alone does not reschedule failures.
+        log.warning("upstream loi, hen thu lai", job_try=job_try)
+        return ReplyOutcome("error", result.telemetry, result.replied, min(2**job_try, 10))
 
     log.warning("that bai nhung khong retry", error=str(result.error))
+    return ReplyOutcome("error", result.telemetry, result.replied)
 
 
 async def handle_summarize(_ctx: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -119,14 +176,18 @@ async def handle_summarize(_ctx: dict[str, Any], payload: dict[str, Any]) -> Non
     trace_id = str(uuid.uuid4())
     scope = ThreadScope(platform=payload["platform"], thread_id=payload["thread_id"])
 
-    batch = await summarize_thread(scope, trace_id)
-    if batch:
-        await extract_facts(scope, batch, trace_id)
+    try:
+        async with web_job_guard(scope, int(payload.get("_thread_generation", 0))) as valid:
+            if not valid:
+                return
+            batch = await summarize_thread(scope, trace_id)
+            if batch:
+                await extract_facts(scope, batch, trace_id)
+    except ThreadBusyError:
+        raise Retry(defer=2) from None
 
 
-def _with_runtime_hooks(
-    deps: Any, on_event: Any, should_stop: Any, is_final_attempt: bool
-) -> Any:
+def _with_runtime_hooks(deps: Any, on_event: Any, should_stop: Any, is_final_attempt: bool) -> Any:
     """Gan cac hook chi biet duoc luc chay vao Deps (dataclass frozen)."""
     from dataclasses import replace
 
@@ -142,10 +203,22 @@ def _with_runtime_hooks(
     )
 
 
+async def worker_heartbeat(_ctx: dict[str, Any]) -> None:
+    await heartbeat("worker")
+
+
+async def maintenance_heartbeat(_ctx: dict[str, Any]) -> None:
+    await heartbeat("maintenance")
+
+
 class WorkerSettings:
     """ARQ doc class nay. Chay: uv run arq main.worker.WorkerSettings"""
 
     functions = [handle_reply]  # noqa: RUF012
+    on_startup = worker_heartbeat
+    cron_jobs = [  # noqa: RUF012
+        cron("main.worker.worker_heartbeat", second={0, 30}, run_at_startup=True)
+    ]
     redis_settings = redis_settings()
     #: PHAI khop _queue_name luc enqueue. Thieu dong nay thi worker lang nghe queue
     #: mac dinh cua ARQ con job nam o queue 'reply' — khong ai nhan, khong ai bao loi.
@@ -167,6 +240,10 @@ class MaintenanceWorkerSettings:
     """
 
     functions = [handle_summarize]  # noqa: RUF012
+    on_startup = maintenance_heartbeat
+    cron_jobs = [  # noqa: RUF012
+        cron("main.worker.maintenance_heartbeat", second={0, 30}, run_at_startup=True)
+    ]
     redis_settings = redis_settings()
     queue_name = QUEUE_MAINTENANCE
     max_jobs = 2

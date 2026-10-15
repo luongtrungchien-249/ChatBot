@@ -1,5 +1,10 @@
 # Vần · Ngôn ngữ · Sáng tạo — plan
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 11/09/2026. Trạng thái: **đã thi công, kết quả ở §8**.
 >
 > Tóm tắt: §6 giữ. Bước 1 và 2 **đều hoàn tác** sau khi đo. Bước 3–6 **bị chặn**.

@@ -114,6 +114,35 @@ class MessageRepository:
         """Tra ve theo thu tu THOI GIAN TANG DAN — dung thu tu doc mot hoi thoai."""
         key = _ctx_key(scope)
 
+        # Web deletion can leave Redis stale during an outage. Reading PostgreSQL
+        # directly also protects a recreated conversation with the same ID.
+        if scope.platform == "web":
+            rows = await fetch(
+                """SELECT sender_id,sender_name,text,created_at,from_bot
+                   FROM inbound_message WHERE platform=$1 AND thread_id=$2
+                   ORDER BY created_at DESC LIMIT $3""",
+                scope.platform,
+                scope.thread_id,
+                limit,
+            )
+            return [_to_stored(row) for row in reversed(rows)]
+
+        # Khong tin cache neu thread khong con trong nguon that. Day chan cache cu
+        # lam du lieu vua xoa tai xuat hien sau khi Redis tam hong luc cleanup.
+        ton_tai = await fetch(
+            """SELECT EXISTS(
+                 SELECT 1 FROM inbound_message WHERE platform = $1 AND thread_id = $2
+               ) AS value""",
+            scope.platform,
+            scope.thread_id,
+        )
+        if not ton_tai or not bool(ton_tai[0]["value"]):
+            try:
+                await aw(get_redis().delete(key))
+            except Exception as error:
+                _log.warning("khong don duoc cache thread da xoa", err=str(error))
+            return []
+
         try:
             cached = await aw(get_redis().lrange(key, 0, limit - 1))
             if len(cached) >= limit:

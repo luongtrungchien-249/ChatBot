@@ -9,15 +9,18 @@ thieu khoa: cho model thay mot cong cu roi de no tra ve rong lien tuc la day no
 bia ra noi dung tai lieu.
 """
 
+from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
 
-from agents.domain.knowledge import RetrievedChunk
+from agents.domain.knowledge import RetrievalEvidence, RetrievedChunk
+from agents.domain.telemetry import RagObservation, RagOutcome
 from agents.ports.llm import CallContext
 from agents.ports.tool import ToolDefinition, ToolRequirements
 from config import get_settings
 from infra.db import fetch
 from infra.logger import get_logger
+from knowledge.retrieve.service import RetrievalResult, RetrievalUnavailableError
 
 _log = get_logger()
 
@@ -60,14 +63,14 @@ KNOWLEDGE_SEARCH_DEFINITION = ToolDefinition(
         "Kho có thể chứa BẤT KỲ loại tài liệu nào họ quan tâm: quy định, quy trình, chính "
         "sách, sổ tay, cẩm nang chuyên môn, sách công thức nấu ăn, hướng dẫn kỹ thuật. "
         "BẠN KHÔNG BIẾT TRONG KHO CÓ GÌ CHO TỚI KHI TRA. "
-        "Cạm bẫy hay gặp nhất là câu hỏi NGƯỢC — hỏi từ đặc điểm ra tên: \"món nào có X và "
-        "Y\", \"tài liệu nào nói về Z\", \"cái nào dùng W\". Ví dụ với \"Món nào có đậu phụ "
-        "và cà chua?\": kể ra vài món bạn biết sẵn là trả lời về THẾ GIỚI, trong khi người "
+        'Cạm bẫy hay gặp nhất là câu hỏi NGƯỢC — hỏi từ đặc điểm ra tên: "món nào có X và '
+        'Y", "tài liệu nào nói về Z", "cái nào dùng W". Ví dụ với "Món nào có đậu phụ '
+        'và cà chua?": kể ra vài món bạn biết sẵn là trả lời về THẾ GIỚI, trong khi người '
         "dùng đang hỏi trong KHO CỦA HỌ có gì. Từng cái tên bạn kể có thể đúng mà cả câu "
         "trả lời vẫn sai, và nó sẽ không có nguồn. "
-        "Cạm bẫy thứ hai, cùng một gốc: câu hỏi về MỘT CON SỐ (\"luộc bao lâu\", \"mấy "
-        "độ\", \"bao nhiêu gram\") hay MỘT CÁCH LÀM (\"làm sao để...\", \"xử lý thế nào\"). "
-        "Ví dụ với \"Ướp thịt bao lâu cho ngấm?\": loại này trông y hệt kiến thức phổ "
+        'Cạm bẫy thứ hai, cùng một gốc: câu hỏi về MỘT CON SỐ ("luộc bao lâu", "mấy '
+        'độ", "bao nhiêu gram") hay MỘT CÁCH LÀM ("làm sao để...", "xử lý thế nào"). '
+        'Ví dụ với "Ướp thịt bao lâu cho ngấm?": loại này trông y hệt kiến thức phổ '
         "thông nên bạn sẽ thấy mình biết thừa — nhưng con số trong tài liệu CỦA HỌ mới "
         "là con số đúng, và nó thường khác con số chung. Vẫn phải tra. "
         "Trả lời từ trí nhớ trong khi tài liệu của họ có sẵn câu trả lời là bỏ phí đúng "
@@ -141,8 +144,8 @@ KNOWLEDGE_SEARCH_DEFINITION = ToolDefinition(
                     "đúng không bao giờ được lấy ra. "
                     "Viết thành câu đầy đủ ngữ cảnh, đừng chỉ vài từ khoá rời — nhưng "
                     "NGẮN, tối đa khoảng mười từ, và chỉ gồm thứ cần tìm. Đừng thêm chỉ "
-                    "dẫn cho công cụ (\"liệt kê 10 món\", \"kèm mô tả ngắn\", \"trừ những "
-                    "món đã kể\"): công cụ không đọc mệnh lệnh, và những chữ thừa đó bị "
+                    'dẫn cho công cụ ("liệt kê 10 món", "kèm mô tả ngắn", "trừ những '
+                    'món đã kể"): công cụ không đọc mệnh lệnh, và những chữ thừa đó bị '
                     "tính vào phép so khớp, kéo truy vấn ra xa đoạn cần tìm. "
                     "GIỮ NGUYÊN, KHÔNG DỊCH: mã số (QD-145/2026), tên riêng, tên món hay "
                     "thuật ngữ đặc thù không có từ tương đương — dịch chúng là làm hỏng "
@@ -163,8 +166,8 @@ KNOWLEDGE_SEARCH_DEFINITION = ToolDefinition(
                     "dùng vừa chọn một mục. Chép NGUYÊN VĂN tên mục họ chọn vào đây, "
                     "kèm nguyên truy vấn tiếng Anh cũ ở `query`. Công cụ sẽ tra sâu và "
                     "rộng hơn quanh mục đó. "
-                    "Họ chọn \"Khác\" hoặc nói không phải mục nào ở trên thì đặt "
-                    "`chon` là \"khác\": công cụ sẽ tra rộng hơn và bỏ qua những mục "
+                    'Họ chọn "Khác" hoặc nói không phải mục nào ở trên thì đặt '
+                    '`chon` là "khác": công cụ sẽ tra rộng hơn và bỏ qua những mục '
                     "vừa gợi ý. Không bao giờ tự bịa giá trị cho tham số này."
                 ),
             },
@@ -288,16 +291,14 @@ def _danh_sach_lua_chon(chunks: list[RetrievedChunk]) -> str:
         dau.setdefault(_ten(c), " ".join(c.content.split())[:_TRICH_DOAN])
 
     ten = list(dau)
-    dong = "\n".join(
-        f"{i}. {t}\n   {dau[t]}" for i, t in enumerate(ten, start=1)
-    )
+    dong = "\n".join(f"{i}. {t}\n   {dau[t]}" for i, t in enumerate(ten, start=1))
     return (
         "KẾT QUẢ KHÔNG CHẮC — tài liệu có vài mục liên quan nhưng không mục nào "
         "khớp hẳn câu hỏi.\n\n"
         "TRƯỚC KHI HỎI LẠI, xét một điều: các mục dưới đây có cùng nói MỘT điều "
         "trả lời được câu hỏi không?\n\n"
         "- CÓ — người dùng hỏi một KỸ THUẬT hay một CÁCH LÀM chung (kiểu "
-        "\"làm sao cho bớt chát\", \"khử mùi thế nào\"), và các mục đều nói giống "
+        '"làm sao cho bớt chát", "khử mùi thế nào"), và các mục đều nói giống '
         "nhau: TRẢ LỜI LUÔN bằng điều chung đó, nêu nguồn, ĐỪNG hỏi lại. Họ hỏi "
         "CÁCH LÀM, không hỏi món nào — bắt họ chọn một món là hỏi sai thứ.\n"
         "- KHÔNG — các mục là những lựa chọn khác nhau, mỗi mục một đáp án riêng: "
@@ -306,16 +307,40 @@ def _danh_sach_lua_chon(chunks: list[RetrievedChunk]) -> str:
         "Cả hai nhánh đều KHÔNG được trả lời từ trí nhớ.\n\n"
         f"{dong}\n"
         f"{len(ten) + 1}. Khác — không phải mục nào ở trên\n\n"
-        "Nhánh hỏi lại là NGOẠI LỆ đã được cho phép của luật \"làm trước, hỏi sau\": bạn đang cầm "
+        'Nhánh hỏi lại là NGOẠI LỆ đã được cho phép của luật "làm trước, hỏi sau": bạn đang cầm '
         "sẵn các mục có thật trong tài liệu, nên đây là một lựa chọn để người dùng "
         "quyết, không phải một câu hỏi thay cho việc tra cứu.\n"
         "Họ chọn xong thì gọi lại search_knowledge_base với `chon` là tên mục họ chọn "
-        f"(hoặc \"khác\" nếu họ chọn mục {len(ten) + 1}), và `query` giữ nguyên như lần "
+        f'(hoặc "khác" nếu họ chọn mục {len(ten) + 1}), và `query` giữ nguyên như lần '
         "này. Lần đó công cụ sẽ trả về nội dung, không hỏi lại nữa."
     )
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeToolOutput:
+    text: str
+    observation: RagObservation
+    evidence: tuple[RetrievalEvidence, ...] | None = None
+
+
+def _observed(
+    text: str, result: RetrievalResult, outcome: RagOutcome, *, low_confidence: bool = False
+) -> KnowledgeToolOutput:
+    return KnowledgeToolOutput(
+        text,
+        RagObservation(outcome, result.retrieval_degraded, result.rerank_degraded, low_confidence),
+        tuple(RetrievalEvidence.from_chunk(chunk) for chunk in result.chunks),
+    )
+
+
 async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str:
+    """Keep the text-only API used by evals and existing callers."""
+    return (await run_observed_knowledge_search(payload, ctx)).text
+
+
+async def run_observed_knowledge_search(
+    payload: dict[str, Any], ctx: CallContext
+) -> KnowledgeToolOutput:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip():
         raise ValueError("search_knowledge_base can tham so query")
@@ -331,19 +356,26 @@ async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str
         # "Khac" nghia la khong muc nao dung, nen KHONG dua no vao truy van — no
         # khong phai mot tu khoa, no la mot loi phu dinh. Chi noi rong pham vi.
         truy_van = query if _la_khac(chon) else f"{chon} {query}"
-        chunks = await knowledge.search(ctx.scope, truy_van, _K_SAU)
+        result = await knowledge.search_detailed(ctx.scope, truy_van, _K_SAU)
+        chunks = result.chunks
         _log.info(
             "tra sau sau khi nguoi dung chon",
             trace_id=ctx.trace_id,
             khac=_la_khac(chon),
             so_doan=len(chunks),
         )
-        return _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY
+        return _observed(
+            _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY,
+            result,
+            "found" if chunks else ("filtered" if result.filtered else "empty"),
+            low_confidence=_chung_chung(chunks, get_settings().RAG_HOI_LAI_TU),
+        )
 
     # PHAM VI di cung cau hoi, y het hop dong cua memory_fact: mot nhom chi doc
     # duoc tai lieu 'chung' va tai lieu cua chinh no. Truoc day khong co tham so
     # nay — moi nhom doc duoc toan bo moi tai lieu.
-    chunks = await knowledge.search(ctx.scope, query, _DEFAULT_K)
+    result = await knowledge.search_detailed(ctx.scope, query, _DEFAULT_K)
+    chunks = result.chunks
 
     if chunks and _chung_chung(chunks, get_settings().RAG_HOI_LAI_TU):
         gan_nhat = min(c.distance for c in chunks if c.distance is not None)
@@ -354,16 +386,32 @@ async def run_knowledge_search(payload: dict[str, Any], ctx: CallContext) -> str
         #
         # Ton them mot lan tim, KHONG ton them lan goi API nao: vector cau hoi da
         # nam trong cache `emb:{sha256}` tu lan tim vua roi.
-        ung_vien = await knowledge.search(ctx.scope, query, _K_SAU) or chunks
+        try:
+            expanded = await knowledge.search_detailed(ctx.scope, query, _K_SAU)
+        except RetrievalUnavailableError as error:
+            # First-pass candidates still exist. Offer them with degraded telemetry.
+            expanded = RetrievalResult(
+                [], retrieval_degraded=True, rerank_degraded=error.rerank_degraded
+            )
+        ung_vien = expanded.chunks or chunks
+        merged = RetrievalResult(
+            ung_vien,
+            retrieval_degraded=result.retrieval_degraded or expanded.retrieval_degraded,
+            rerank_degraded=result.rerank_degraded or expanded.rerank_degraded,
+        )
         _log.info(
             "lan tim chung chung — hoi nguoi dung chon",
             trace_id=ctx.trace_id,
             khoang_cach_gan_nhat=round(gan_nhat, 4),
             so_ung_vien=len({_ten(c) for c in ung_vien}),
         )
-        return _danh_sach_lua_chon(ung_vien)
+        return _observed(_danh_sach_lua_chon(ung_vien), merged, "uncertain", low_confidence=True)
 
-    return _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY
+    return _observed(
+        _dinh_dang(chunks, query) if chunks else _KHONG_TIM_THAY,
+        result,
+        "found" if chunks else ("filtered" if result.filtered else "empty"),
+    )
 
 
 #: Cau nay di thang vao prompt, va no la don bay manh nhat cua ca luong: no den DUNG
@@ -399,7 +447,7 @@ def _dinh_dang(chunks: list[RetrievedChunk], query: str = "") -> str:
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     header = (
         f"=== KẾT QUẢ TRA CỨU TÀI LIỆU NỘI BỘ ===\n"
-        f"Truy vấn gốc: \"{query}\"\n"
+        f'Truy vấn gốc: "{query}"\n'
         f"Số đoạn tìm được: {len(chunks)}\n"
         f"Phương pháp: hybrid (vector + BM25 + rerank)\n"
         f"Thời điểm: {now}"

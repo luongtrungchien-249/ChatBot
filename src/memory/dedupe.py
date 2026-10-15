@@ -1,33 +1,17 @@
-"""Chong trung va mau thuan cho fact L3.
+"""Conservative deduplication: similarity is not proof of contradiction.
 
-Khong co buoc nay thi sau vai tuan bang day cac bien the cua cung mot cau: "Nam lam
-backend", "Nam lam ve backend", "Nam phu trach backend" — ba dong, mot y, va ca ba
-deu di vao prompt moi luot.
-
-Nguong lay tu ARCHITECTURE.md section 6.2. Chung la NGUONG, khong phai chan ly: do
-tren du lieu that roi chinh, dung suy doan.
+Only normalized identical text is suppressed. Different paraphrases, preferences,
+and employment statements are preserved; an explicit scoped replacement is the
+only write path that revokes an older fact. No LLM or threshold can silently turn
+an additive fact into a destructive update.
 """
 
 import math
 from dataclasses import dataclass
 from typing import TypeAlias
 
-#: Tren nguong nay thi hai fact duoc coi la NOI VE CUNG MOT DIEU (trung y hoac mau
-#: thuan). Do bang ops/calibrate_dedupe.py ngay 06/09/2026 voi
-#: text-embedding-3-large @ 1024 chieu:
-#:
-#:     can BAT (trung y + mau thuan)         0,736 - 0,958
-#:     can BO QUA (khac fact, cung mot nguoi) 0,276 - 0,524
-#:     khoang an toan                         (0,524 ; 0,736)
-#:
-#: KHONG lay diem giua khoang do, vi hai huong sai khong ngang nhau:
-#:   - Nguong cao qua -> bang co ban trung. Phien, ton cho trong prompt, khong mat gi.
-#:   - Nguong thap qua -> fact moi REVOKE fact cu. Mat thong tin, va im lang.
-#: Nen lech len sat can tren, chi chua mot bien an nho.
-#:
-#: ARCHITECTURE.md va master-plan deu ghi "cosine > 0,9". Con so do viet TRUOC khi
-#: co phep do nao va KHONG dung voi model nay — 0,9 thi ngay ca hai cach dien dat
-#: cua cung mot y (0,736) cung khong bi coi la trung.
+#: Historical candidate threshold retained for the calibration scripts. It is
+#: never authorization to replace a fact; decide() does not use this threshold.
 DUPLICATE_THRESHOLD = 0.70
 
 #: Nguong cho lenh `quen <noi dung>`. THAP hon han, va co chu dich.
@@ -66,11 +50,7 @@ class Skip:
 
 @dataclass(frozen=True, slots=True)
 class Replace:
-    """Mau thuan voi mot fact dang co — revoke cai cu roi chen cai moi.
-
-    Vi du: "Nam lam o cong ty A" roi sau do "Nam lam o cong ty B". Giu ca hai thi
-    prompt chua hai su that loai tru nhau va model se chon bua mot cai.
-    """
+    """Explicit replacement intent, never inferred by decide() from cosine."""
 
     existing_id: str
     similarity: float
@@ -106,27 +86,11 @@ def decide(
     ve ngu nghia nhung noi ve hai nguoi khac nhau. Loc theo subject truoc khi goi
     ham nay la mot phan cua hop dong.
     """
-    if not existing:
-        return Insert()
-
-    best_id, best_content, best_score = "", "", -1.0
+    normalized = _normalize(new_content)
     for fact_id, content, vector in existing:
-        score = cosine(new_vector, vector)
-        if score > best_score:
-            best_id, best_content, best_score = fact_id, content, score
-
-    if best_score < DUPLICATE_THRESHOLD:
-        return Insert()
-
-    # Rat giong nhau. Cung mot cau chu (bo khoang trang, khong phan biet hoa thuong)
-    # thi chac chan la trung; khac chu thi coi la BAN CAP NHAT va thay the.
-    #
-    # Khong hoi model o day: them mot lan goi model vao duong ghi fact de phan biet
-    # "trung y" voi "mau thuan" la doi do tre va tien lay mot phan biet ma hau qua
-    # hai ben gan nhu nhau — ca hai deu ket thuc bang MOT fact dung trong bang.
-    if _normalize(new_content) == _normalize(best_content):
-        return Skip(existing_id=best_id, similarity=best_score)
-    return Replace(existing_id=best_id, similarity=best_score)
+        if normalized == _normalize(content):
+            return Skip(existing_id=fact_id, similarity=cosine(new_vector, vector))
+    return Insert()
 
 
 def _normalize(text: str) -> str:

@@ -2,8 +2,7 @@
 
 Gia (USD / 1M token) de cost_meter tinh cost_usd. Xem ARCHITECTURE.md section 8.
 
-Nha cung cap: OpenAI. gpt-5-mini la ban ke nhiem chinh thuc cua o4-mini va re hon
-han (0,25 so voi 1,10 input; 2,00 so voi 4,40 output).
+Nha cung cap: OpenAI. Toan bo route sinh van ban dung gpt-4o-mini.
 
 Hien tai MOI route dung chung mot model — dung mot agent hoi dap. Khi nao tach
 multi-agent, ba route chay nen (summarize/extract_facts/compress) nen ha xuong
@@ -43,12 +42,12 @@ class ModelConfig:
     api_key: str | None = None
 
 
-#: gpt-5-mini: context 400K, max output 128K.
-_GPT_5_MINI = {
-    "id": "gpt-5-mini",
-    "price_in": 0.25,
-    "price_cached_in": 0.025,
-    "price_out": 2.0,
+#: gpt-4o-mini: model khong reasoning, nen khong gui reasoning_effort.
+_GPT_4O_MINI = {
+    "id": "gpt-4o-mini",
+    "price_in": 0.15,
+    "price_cached_in": 0.075,
+    "price_out": 0.60,
 }
 
 #: CANH BAO ve max_completion_tokens tren model reasoning.
@@ -76,13 +75,13 @@ _GPT_5_MINI = {
 #: cau hoi lam ro thi sua PROMPT (xem agents/prompt/system.py, khoi CONSTRAINTS),
 #: khong phai tang effort.
 MODELS: dict[Route, ModelConfig] = {
-    "reply": ModelConfig(effort="low", max_tokens=16_000, **_GPT_5_MINI),  # type: ignore[arg-type]
-    "summarize": ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI),  # type: ignore[arg-type]
-    "extract_facts": ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI),  # type: ignore[arg-type]
+    "reply": ModelConfig(effort=None, max_tokens=16_000, **_GPT_4O_MINI),  # type: ignore[arg-type]
+    "summarize": ModelConfig(effort=None, max_tokens=4_000, **_GPT_4O_MINI),  # type: ignore[arg-type]
+    "extract_facts": ModelConfig(effort=None, max_tokens=4_000, **_GPT_4O_MINI),  # type: ignore[arg-type]
     # Nen ket qua cong cu. Route RIENG chu khong dung chung 'summarize': gop lai thi
     # usage_log tron chi phi nen mot trang web vao chi phi nen hoi thoai L2, va cau
     # hoi "viec nen L2 ton bao nhieu" khong con tra loi duoc.
-    "compress": ModelConfig(effort="low", max_tokens=8_000, **_GPT_5_MINI),  # type: ignore[arg-type]
+    "compress": ModelConfig(effort=None, max_tokens=8_000, **_GPT_4O_MINI),  # type: ignore[arg-type]
 }
 
 #: Gia embedding, USD / 1M token.
@@ -287,4 +286,4 @@ def _model_tho() -> ModelConfig:
             effort="low" if reasoning else None,
         )
 
-    return ModelConfig(effort="low", max_tokens=4_000, **_GPT_5_MINI)  # type: ignore[arg-type]
+    return ModelConfig(effort=None, max_tokens=4_000, **_GPT_4O_MINI)  # type: ignore[arg-type]

@@ -10,13 +10,16 @@ chunk 42 phai con nguyen van do — sua tai cho la lam moi trich dan cu noi doi.
 """
 
 import hashlib
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from agents.policy.injection import detect_injection
 from infra.db import fetch, transaction
 from infra.logger import get_logger
-from llm.embedder import get_embedder
+from knowledge.provenance import identity_from_row
+from llm.embedder import EmbeddingIdentity, embedding_identity, get_embedder
 
 from .chunk import Chunk, chunk_document
 from .extract import extract_document
@@ -63,6 +66,38 @@ def _checksum(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+_LATEST_DOCUMENT_SQL = """SELECT id, version, max(version) OVER () AS max_version,
+                                checksum, title, pham_vi,
+                                embedding_provider, embedding_model, embedding_dim,
+                                embedding_revision
+                           FROM kb_document
+                          WHERE source_path = $1
+                          ORDER BY la_ban_moi_nhat DESC, version DESC LIMIT 1"""
+
+
+def _may_skip(existing: list[Any], checksum: str, identity: EmbeddingIdentity, ep: bool) -> bool:
+    if not existing or ep:
+        return False
+    document = existing[0]
+    if document["checksum"] != checksum:
+        return False
+    if identity_from_row(document) != identity:
+        raise ValueError(
+            "Tai lieu khong doi nhung embedding provenance chua biet hoac khong khop. "
+            "Chi attest khi co bang chung; dung --nap-lai de tao phien ban embedding moi."
+        )
+    return True
+
+
+def _validate_vectors(vectors: list[list[float]], count: int, identity: EmbeddingIdentity) -> None:
+    if len(vectors) != count or any(
+        len(vector) != identity.dimensions
+        or any(type(value) not in (int, float) or not math.isfinite(value) for value in vector)
+        for vector in vectors
+    ):
+        raise ValueError("Embedding response count/dimension/values do not match document identity")
+
+
 async def ingest_file(
     path: Path, ingested_by: str, title: str | None = None, ep: bool = False
 ) -> IngestResult:
@@ -83,12 +118,9 @@ async def ingest_file(
     # no khong biet CACH CAT doi. Doi luat cat muc (chunk.py) hay luat lam sach ma
     # tep khong doi thi day la duong duy nhat de dua thay doi do vao CSDL — khong co
     # no thi ban vá nam trong ma nguon va khong bao gio toi duoc kho dang chay.
-    existing = await fetch(
-        """SELECT id, version, checksum FROM kb_document
-            WHERE source_path = $1 ORDER BY version DESC LIMIT 1""",
-        source_path,
-    )
-    if existing and existing[0]["checksum"] == checksum and not ep:
+    identity = embedding_identity()
+    existing = await fetch(_LATEST_DOCUMENT_SQL, source_path)
+    if _may_skip(existing, checksum, identity, ep):
         _log.info("tai lieu khong doi, bo qua", path=source_path, version=existing[0]["version"])
         return IngestResult(
             doc_id=int(existing[0]["id"]),
@@ -98,7 +130,6 @@ async def ingest_file(
             skipped=True,
         )
 
-    version = int(existing[0]["version"]) + 1 if existing else 1
     chunks = chunk_document(text, tai_lieu.ban_do_trang)
     if not chunks:
         raise ValueError(f"{path} khong cat duoc chunk nao")
@@ -123,10 +154,28 @@ async def ingest_file(
     embedder = get_embedder()
     for start in range(0, len(embed_inputs), _EMBED_BATCH):
         vectors.extend(await embedder.embed(embed_inputs[start : start + _EMBED_BATCH]))
+        if embedding_identity() != identity:
+            raise ValueError("Embedding configuration changed during ingestion")
+    _validate_vectors(vectors, len(chunks), identity)
 
     # Mot transaction cho ca tai lieu: hong giua chung ma van de lai nua so chunk
     # nghia la bot tra loi dua tren nua tai lieu ma khong ai biet.
     async with transaction() as connection:
+        # Concurrent ingesters may have read the same version before embedding.
+        # Serialize the final state transition and recheck under this lock. A
+        # hash collision only serializes unrelated sources; it cannot mix their rows.
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", source_path
+        )
+        current = await connection.fetch(_LATEST_DOCUMENT_SQL, source_path)
+        if _may_skip(current, checksum, identity, ep):
+            return IngestResult(
+                doc_id=int(current[0]["id"]), title=doc_title,
+                version=int(current[0]["version"]), chunks=0, skipped=True,
+            )
+        version = int(current[0]["max_version"]) + 1 if current else 1
+        # A forced version must never make a formerly private document public.
+        pham_vi = current[0]["pham_vi"] if current else "chung"
         # Ha co ban cu TRUOC khi chen ban moi. Phai nam trong cung transaction: nam
         # ngoai thi co mot khoang thoi gian hoac khong ban nao la moi nhat (mat het
         # ket qua tim kiem), hoac hai ban cung la moi nhat (tron v1 voi v2).
@@ -139,13 +188,20 @@ async def ingest_file(
             source_path,
         )
         row = await connection.fetchrow(
-            """INSERT INTO kb_document (title, source_path, version, checksum, ingested_by)
-               VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+            """INSERT INTO kb_document (title, source_path, version, checksum, ingested_by,
+                      pham_vi, embedding_provider, embedding_model, embedding_dim,
+                      embedding_revision, embedding_provenance)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ingested') RETURNING id""",
             doc_title,
             source_path,
             version,
             checksum,
             ingested_by,
+            pham_vi,
+            identity.provider,
+            identity.model,
+            identity.dimensions,
+            identity.revision,
         )
         doc_id = int(row["id"])
         for chunk, embed_input, vector in zip(chunks, embed_inputs, vectors, strict=True):

@@ -1,0 +1,18 @@
+# URL is supplied via a private mounted file, including any provider token in it.
+# Receiver must accept the generic Alertmanager webhook schema.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: cp-operator
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: cp-operator
+    webhook_configs:
+      - url_file: /run/secrets/alert_webhook_url
+        send_resolved: true
+        http_config:
+          follow_redirects: false
+        timeout: 10s

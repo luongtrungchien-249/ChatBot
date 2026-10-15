@@ -11,6 +11,7 @@ import asyncio
 
 from adapters.zalo_bot.polling import poll_forever
 from config import get_settings
+from infra.db import close_db
 from infra.http import close_http
 from infra.logger import configure_logging, get_logger
 from infra.queue import close_queue
@@ -35,6 +36,7 @@ async def main() -> None:
     try:
         await poll_forever()
     finally:
+        await close_db()
         await close_queue()
         await close_redis()
         await close_http()

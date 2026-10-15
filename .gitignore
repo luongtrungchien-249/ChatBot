@@ -13,6 +13,8 @@ __pycache__/
 .import_linter_cache/
 htmlcov/
 .coverage
+test-results.xml
+embedding-test-results.xml
 
 *.log
 .DS_Store
@@ -21,6 +23,9 @@ htmlcov/
 evals/corpus/*
 !evals/corpus/.gitkeep
 !evals/corpus/README.md
+
+# Generated benchmark/preflight evidence; review before sharing outside the workspace.
+evals/results/
 
 
 # Không được đẩy data lên git

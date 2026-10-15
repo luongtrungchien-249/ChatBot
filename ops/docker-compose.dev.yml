@@ -1,0 +1,7 @@
+# Local development: Docker hosts data services; API/workers run on the host.
+# Dev identity requires loopback, so it is never relaxed for Docker bridge clients.
+services:
+  postgres:
+    ports: ['127.0.0.1:5432:5432']
+  redis:
+    ports: ['127.0.0.1:6379:6379']

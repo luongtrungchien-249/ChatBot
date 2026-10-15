@@ -1,5 +1,10 @@
 # Sửa thơ "ngang" — plan
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 15/09/2026. Trạng thái: **§3 (lớp A) đã xong**; §5 đang chờ bạn chấm tay.
 >
 > Xuất phát: người dùng chấm tay 5 bài đầu và chỉ ra thơ *"bị ngang"*.

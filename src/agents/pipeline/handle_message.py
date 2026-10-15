@@ -12,7 +12,7 @@ chung la ha tang, va handle_message phai test duoc ma khong can Redis.
 
 from asyncio import gather
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
 from shared.result import Ok
@@ -20,6 +20,7 @@ from tho.y_dinh import YeuCauTho, nhan_dien
 
 from ..domain.errors import BotError, is_config_error, is_retryable
 from ..domain.message import InboundMessage, scope_of
+from ..domain.telemetry import GenerationStats, TurnDetails, upstream_failure
 from ..domain.thread import ThreadScope, user_subject
 from ..policy.access import AccessRules
 from ..policy.injection import detect_injection
@@ -27,7 +28,7 @@ from ..policy.mention import primary_name
 from ..ports.channel import ChannelPort
 from ..ports.llm import CallContext, Effort, LlmPort
 from ..ports.logger import LoggerPort
-from ..ports.memory import MemoryPort
+from ..ports.memory import MemoryPort, MemoryUnavailableError
 from ..ports.ratelimit import RateLimitPort
 from ..ports.tool import ToolPort
 from ..prompt.context import ContextEnvelope, ContextInput
@@ -52,7 +53,7 @@ from .stages.mention import Ask, Ignore, ShowHelp, help_text, resolve_mention_st
 from .stages.persist import persist_inbound, persist_outbound
 from .stages.ratelimit import RATE_LIMITED_TEXT, Pass, Warn, check_rate_limit
 from .stages.respond import respond
-from .stages.tho import lam_tho
+from .stages.tho import PoetryStoppedError, PoetryUpstreamError, lam_tho
 from .stages.typing_ import start_typing
 
 
@@ -60,6 +61,7 @@ from .stages.typing_ import start_typing
 class Handled:
     replied: bool
     ok: Literal[True] = True
+    telemetry: TurnDetails = field(default_factory=TurnDetails, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +73,7 @@ class Failed:
     #: lam lan retry tu thoat ngay, va `max_tries` thanh vo nghia.
     replied: bool
     ok: Literal[False] = False
+    telemetry: TurnDetails = field(default_factory=TurnDetails, compare=False)
 
 
 HandleResult: TypeAlias = Handled | Failed
@@ -131,7 +134,48 @@ def _co_tai_lieu(prompt: ContextEnvelope) -> bool:
     return any("<tai_lieu" in m.content for m in prompt.messages)
 
 
+async def _finalize(
+    msg: InboundMessage, deps: Deps, text: str, *, user_text: str, has_sources: bool = False
+) -> None:
+    """Every generated final uses the same public representation and lifecycle."""
+    scope = scope_of(msg)
+    log = deps.logger.bind(trace_id=msg.trace_id, platform=msg.platform)
+    public_text = await respond(
+        deps.channel, scope, text, msg.message_id, logger=log,
+        van_ban_nguoi_dung=user_text, co_tai_lieu=has_sources,
+    )
+    await persist_outbound(
+        deps.memory, scope, msg.message_id, primary_name(deps.bot_name),
+        public_text, msg.is_group,
+    )
+    if deps.schedule_maintenance is not None:
+        try:
+            await deps.schedule_maintenance(scope)
+        except Exception as error:
+            log.warning("khong xep hang duoc job nen L2", err=type(error).__name__)
+
+
 async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
+    try:
+        return await _handle_message(msg, deps)
+    except MemoryUnavailableError as error:
+        deps.logger.warning("semantic memory unavailable", error_type=type(error).__name__)
+        # append is idempotent; commands may fail before the normal persist stage.
+        await persist_inbound(deps.memory, msg)
+        await _finalize(
+            msg, deps,
+            "Bộ nhớ đang cần được quản trị viên xác minh. Bạn có thể xem hoặc xoá dữ liệu đã lưu.",
+            user_text=msg.text,
+        )
+        return Failed(
+            error.bot_error, replied=True,
+            telemetry=TurnDetails(
+                "error", True, failure=upstream_failure(error.bot_error)
+            ),
+        )
+
+
+async def _handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     log = deps.logger.bind(trace_id=msg.trace_id, platform=msg.platform)
     scope = scope_of(msg)
     ctx = CallContext(scope=scope, sender_id=msg.sender_id, trace_id=msg.trace_id)
@@ -139,15 +183,15 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     #  1. access — khong duoc phep thi dung, IM LANG.
     if not check_access(msg, deps.access_rules):
         log.info("thread khong trong allowlist, bo qua", thread_id=msg.thread_id)
-        return Handled(replied=False)
+        return Handled(replied=False, telemetry=TurnDetails("ignored_access", False))
 
     #  2. mention
     mention = resolve_mention_stage(msg, deps.bot_name)
     if isinstance(mention, Ignore):
-        return Handled(replied=False)
+        return Handled(replied=False, telemetry=TurnDetails("ignored_mention", False))
     if isinstance(mention, ShowHelp):
         await respond(deps.channel, scope, help_text(deps.bot_name), msg.message_id, logger=log)
-        return Handled(replied=True)
+        return Handled(replied=True, telemetry=TurnDetails("help", False))
     assert isinstance(mention, Ask)
 
     #  2b. INPUT RAILS — do injection/jailbreak tren tin nhan nguoi dung.
@@ -172,19 +216,27 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     outcome = await handle_command(mention.text, deps.memory, scope, msg.sender_id)
     if isinstance(outcome, Answer):
         await respond(
-            deps.channel, scope, outcome.text, msg.message_id,
-            logger=log, van_ban_nguoi_dung=mention.text,
+            deps.channel,
+            scope,
+            outcome.text,
+            msg.message_id,
+            logger=log,
+            van_ban_nguoi_dung=mention.text,
         )
-        return Handled(replied=True)
+        return Handled(replied=True, telemetry=TurnDetails("command", False))
     if isinstance(outcome, AskConfirm):
         # Ghi yeu cau dang cho TRUOC khi hoi: hoi xong moi ghi thi nguoi dung tra
         # loi that nhanh se gap mot cau "khong co yeu cau nao dang cho".
         await deps.memory.stage_forget(scope, msg.sender_id, [f.id for f in outcome.facts])
         await respond(
-            deps.channel, scope, outcome.text, msg.message_id,
-            logger=log, van_ban_nguoi_dung=mention.text,
+            deps.channel,
+            scope,
+            outcome.text,
+            msg.message_id,
+            logger=log,
+            van_ban_nguoi_dung=mention.text,
         )
-        return Handled(replied=True)
+        return Handled(replied=True, telemetry=TurnDetails("command", False))
 
     #  4. ratelimit — user va thread, token bucket.
     limit = await check_rate_limit(deps.rate_limit, scope, msg.sender_id)
@@ -198,25 +250,29 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
         )
         if isinstance(limit, Warn):
             await respond(deps.channel, scope, RATE_LIMITED_TEXT, msg.message_id, logger=log)
-            return Handled(replied=True)
+            return Handled(replied=True, telemetry=TurnDetails("rate_limited", False))
         # Da nhac thread nay trong 5 phut qua roi. Im lang o day KHONG mau thuan voi
         # "im lang trong nhom trong nhu bot chet": nguoi dung vua duoc noi la hay
         # cham lai, nhac lai lan nua chi la bot tu spam.
-        return Handled(replied=False)
+        return Handled(replied=False, telemetry=TurnDetails("rate_limited", False))
 
     #  5. budget-guard — CHOT CHAN CUNG, khong phai alert.
     if not await check_budget(deps.rate_limit):
         await respond(deps.channel, scope, BUDGET_EXCEEDED_TEXT, msg.message_id, logger=log)
-        return Handled(replied=True)
+        return Handled(replied=True, telemetry=TurnDetails("budget", False))
 
     #  5b. lenh GHI da qua duoc ratelimit va ngan sach — gio moi thuc hien.
     if isinstance(outcome, DeferredWrite):
         text = await run_deferred_write(outcome, deps.memory, scope, msg.sender_id)
         await respond(
-            deps.channel, scope, text, msg.message_id,
-            logger=log, van_ban_nguoi_dung=mention.text,
+            deps.channel,
+            scope,
+            text,
+            msg.message_id,
+            logger=log,
+            van_ban_nguoi_dung=mention.text,
         )
-        return Handled(replied=True)
+        return Handled(replied=True, telemetry=TurnDetails("command", False))
 
     #  6. persist — ghi TRUOC khi goi model, de cau hoi khong bien mat khi API hong.
     await persist_inbound(deps.memory, msg)
@@ -247,14 +303,45 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     y_dinh = nhan_dien(mention.text)
     if isinstance(y_dinh, YeuCauTho):
         log.info("yeu cau lam tho", the_tho=y_dinh.the_tho)
-        bai = await lam_tho(
-            y_dinh, deps.llm, max_tokens=deps.reply.max_tokens, ctx=ctx, logger=log
+        poetry_calls = 0
+
+        def collect_poetry_calls(calls: int) -> None:
+            nonlocal poetry_calls
+            poetry_calls = calls
+
+        try:
+            bai = await lam_tho(
+                y_dinh, deps.llm, max_tokens=deps.reply.max_tokens, ctx=ctx, logger=log,
+                deadline_ms=deps.react.deadline_ms, should_stop=deps.should_stop,
+                within_budget=deps.rate_limit.within_daily_budget, on_calls=collect_poetry_calls,
+            )
+        except PoetryStoppedError as stopped:
+            text = {
+                "budget": BUDGET_EXCEEDED_TEXT,
+                "deadline": "Mình chưa hoàn thành bài thơ trong thời gian cho phép.",
+                "user_stopped": "Đã dừng làm thơ theo yêu cầu của bạn.",
+            }[stopped.reason]
+            await _finalize(msg, deps, text, user_text=mention.text)
+            return Handled(
+                replied=True,
+                telemetry=TurnDetails(stopped.reason, False, poetry_calls=poetry_calls),
+            )
+        except PoetryUpstreamError as upstream:
+            will_retry = is_retryable(upstream.error) and not deps.is_final_attempt
+            if not will_retry:
+                text = CONFIG_ERROR_TEXT if is_config_error(upstream.error) else FALLBACK_TEXT
+                await _finalize(msg, deps, text, user_text=mention.text)
+            return Failed(
+                upstream.error, replied=not will_retry,
+                telemetry=TurnDetails(
+                    "error", not will_retry, failure=upstream_failure(upstream.error),
+                    poetry_calls=poetry_calls,
+                ),
+            )
+        await _finalize(msg, deps, bai, user_text=mention.text)
+        return Handled(
+            replied=True, telemetry=TurnDetails("poetry", False, poetry_calls=poetry_calls)
         )
-        await respond(
-            deps.channel, scope, bai, msg.message_id,
-            logger=log, van_ban_nguoi_dung=mention.text,
-        )
-        return Handled(replied=True)
 
     # 10. recall — L1 + L2 + L3. Ba lan doc doc lap nen chay SONG SONG: tuan tu thi
     #     cong thang do tre cua ca ba vao duong phan hoi ma khong duoc gi.
@@ -278,6 +365,12 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     )
 
     # 12. generate — vong ReAct: Thought -> Action -> Observation -> lap.
+    generation = GenerationStats()
+
+    def collect_metrics(measured: GenerationStats) -> None:
+        nonlocal generation
+        generation = measured
+
     result = await generate(
         GenerateDeps(
             llm=deps.llm,
@@ -289,6 +382,7 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
             deadline_ms=deps.react.deadline_ms,
             should_stop=deps.should_stop,
             on_event=deps.on_react_event,
+            on_metrics=collect_metrics,
         ),
         prompt,
         ctx,
@@ -307,33 +401,23 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
         will_retry = is_retryable(result.error) and not deps.is_final_attempt
         if not will_retry:
             text = CONFIG_ERROR_TEXT if is_config_error(result.error) else FALLBACK_TEXT
-            await respond(deps.channel, scope, text, msg.message_id, logger=log)
+            await _finalize(msg, deps, text, user_text=mention.text)
         else:
             log.info("con luot retry, chua gui cau fallback", error=str(result.error))
         # Van bao loi ra ngoai de worker quyet dinh retry (chi UpstreamError moi
         # retry, xem is_retryable).
-        return Failed(error=result.error, replied=not will_retry)
+        return Failed(
+            error=result.error,
+            replied=not will_retry,
+            telemetry=TurnDetails(
+                generation.reason, not will_retry, generation, upstream_failure(result.error)
+            ),
+        )
 
     # 13. respond — CHOT CHAN CUOI CUNG. Xem agents/policy/output_guard.py.
-    await respond(
-        deps.channel,
-        scope,
-        result.value,
-        msg.message_id,
-        logger=log,
-        # Thong tin ca nhan nguoi dung VUA go ra thi bot duoc phep nhac lai; thu bot
-        # lay tu tai lieu, tu web hay tu bo nho cua nguoi khac thi khong.
-        van_ban_nguoi_dung=mention.text,
-        # Co khoi <tai_lieu> trong prompt thi cau tra loi phai neu nguon.
-        co_tai_lieu=_co_tai_lieu(prompt),
-    )
-    await persist_outbound(
-        deps.memory,
-        scope,
-        msg.message_id,
-        primary_name(deps.bot_name),
-        result.value,
-        msg.is_group,
+    await _finalize(
+        msg, deps, result.value, user_text=mention.text,
+        has_sources=_co_tai_lieu(prompt) or generation.retrieved_chunks > 0,
     )
 
     # 14. account  Da ghi trong llm/cost_meter.py ngay tai lan goi.
@@ -341,10 +425,6 @@ async def handle_message(msg: InboundMessage, deps: Deps) -> HandleResult:
     # 15. schedule — day job nen L2 vao hang doi `maintenance`. KHONG chay tai day:
     #     nen ton mot lan goi model, va nguoi dung da nhan cau tra loi o stage 13 roi.
     #     Hong o day khong duoc lam hong ca luot: cau tra loi da gui di.
-    if deps.schedule_maintenance is not None:
-        try:
-            await deps.schedule_maintenance(scope)
-        except Exception as error:
-            log.warning("khong xep hang duoc job nen L2", err=str(error))
+    # _finalize scheduled maintenance after recording the exact public final.
 
-    return Handled(replied=True)
+    return Handled(replied=True, telemetry=TurnDetails(generation.reason, False, generation))

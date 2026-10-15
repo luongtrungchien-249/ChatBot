@@ -29,7 +29,7 @@ def _redact_processor(
     return {k: redact_deep(v) for k, v in event_dict.items()}
 
 
-def configure_logging() -> None:
+def configure_logging(*, stderr: bool = False) -> None:
     settings = get_settings()
     is_dev = settings.NODE_ENV == "development"
 
@@ -47,6 +47,10 @@ def configure_logging() -> None:
     )
 
     structlog.configure(
+        logger_factory=(
+            structlog.PrintLoggerFactory(file=sys.stderr)
+            if stderr else structlog.PrintLoggerFactory()
+        ),
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,

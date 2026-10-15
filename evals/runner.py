@@ -38,14 +38,15 @@ lay dung ca hai chunk dap an. Hai nhom `giao_tap_hop` va `xuyen_ngon_ngu` o che 
 dinh la CAN DUOI, khong phai chat luong that.
 
 Doi lai, che do qua cong cu:
-  - KHONG tinh duoc Recall@5. Cong cu tra ve van ban da dinh dang, khong kem chunk_id
-    (xem `_dinh_dang` trong tools/knowledge_search.py). Do la ly do bo golden mang
-    `neo` — phep dem chu khong dinh toi id nen no song o ca hai che do.
+  - Recall@5 dung typed provenance cua tool: K chunk ID unique dau tien theo thu tu
+    tool call/result. Metadata thieu/loi/khong goi tool giu unknown; retrieval empty
+    da do cho Recall=0. Khong parse ID/scope/version tu van ban trich dan.
   - Do tre do CA LUOT, gom moi vong ReAct. Con so nay moi la do tre nguoi dung cam
     nhan, nhung no khong so sanh duoc voi cac lan chay o che do mac dinh.
   - On hon: model co the goi cong cu nhieu lan, hoac khong goi lan nao.
 
-CHAY TON TIEN THAT. Khung cu: 3 lan goi model moi cau. Them --ragas: 7 lan. Chay
+CHAY TON TIEN THAT. Them final-answer judge de do claims/no-answer; so call tuy
+applicability, va Answer Relevance con goi embedding. Chay
 nightly va khi PR dung vao prompt/, knowledge/, llm/models.py — khong phai moi commit.
 
 Chay:
@@ -54,8 +55,10 @@ Chay:
     uv run python -m evals.runner evals/dataset/golden.jsonl --ragas --qua-cong-cu
 """
 
+import argparse
 import asyncio
 import dataclasses
+import hashlib
 import json
 import sys
 import time
@@ -68,6 +71,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from adapters.cli.normalize import normalize_cli_input
+from agents.domain.knowledge import RetrievalEvidence
 from agents.domain.thread import ThreadScope
 from agents.pipeline.handle_message import handle_message
 from agents.pipeline.stages.generate import CONFIG_ERROR_TEXT, FALLBACK_TEXT
@@ -76,6 +80,7 @@ from agents.ports.llm import CallContext, ToolCall
 from agents.ports.tool import ToolDefinition, ToolPort, ToolResult
 from agents.prompt.builder import render_knowledge
 from agents.prompt.context import ContextInput, build_context
+from config import get_settings
 from infra.db import close_db
 from infra.logger import get_logger
 from infra.redis_client import close_redis
@@ -84,13 +89,31 @@ from llm.models import MODELS
 from llm.openai_client import llm
 from main.container import build_deps
 
+from .corpus_contract import check_corpus, corpus_fingerprint
+from .dataset_contract import (
+    MINIMUM_TOTAL,
+    annotation_deficits,
+    check_review,
+    coverage_deficits,
+    load_and_validate,
+    split_for_id,
+)
 from .metrics.answer_relevance import judge_answer_relevance
 from .metrics.claim_faithfulness import judge_claim_faithfulness
 from .metrics.context_precision import judge_context_precision
 from .metrics.context_recall import judge_context_recall
 from .metrics.faithfulness import judge_faithfulness
+from .metrics.final_answer import judge_final_answer
 from .metrics.latency import percentile
 from .metrics.recall import recall_at_k
+from .run_artifact import (
+    METRICS,
+    build_artifact,
+    config_hash,
+    no_answer_summary,
+    source_identity,
+    write_artifact,
+)
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "dataset" / "qa.jsonl"
 
@@ -119,6 +142,7 @@ LATENCY_P95_MAX_MS = 5_000
 CONTEXT_RECALL_MIN = 0.85
 CONTEXT_PRECISION_MIN = 0.70
 CLAIM_FAITHFULNESS_MIN = 0.90
+NO_ANSWER_FALSE_ANSWER_MAX = 0.05
 
 #: Answer Relevance KHONG lam cong chan, va day la mot lua chon co ly do.
 #:
@@ -156,14 +180,19 @@ class Row:
     #: Cum tu DAC TRUNG phai xuat hien trong ngu canh. Thay cho `expected_chunk_ids`:
     #: id chet moi lan nap lai, cum tu thi song.
     neo: tuple[str, ...] = ()
+    answerable: bool = True
+    scope: str = "chung"
+    forbidden_claims: tuple[str, ...] = ()
+    # Legacy `neo` are contextual anchors, not human-reviewed final-answer claims.
+    required_claims: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class Outcome:
     row: Row
-    #: None = KHONG CHAM DUOC hoac KHONG AP DUNG, khac han 0.0 la "cham va truot".
+    #: None requires metric_states to distinguish unknown from not applicable.
     recall: float | None
-    faithfulness: float
+    faithfulness: float | None
     neo_recall: float | None
     context_recall: float | None
     context_precision: float | None
@@ -174,25 +203,95 @@ class Outcome:
     #: Truy van MODEL TU VIET, chi co o che do --qua-cong-cu. Rong nghia la model
     #: khong goi cong cu lan nao — mot ket qua rat dang doc, khong phai mot cho trong.
     truy_van: tuple[str, ...] = ()
+    refused: bool | None = None
+    required_claims_recall: float | None = None
+    forbidden_claims_rate: float | None = None
+    retrieval_scope_violation_rate: float | None = None
+    retrieval_version_violation_rate: float | None = None
+
+
+def metric_states(outcome: Outcome, ragas: bool, qua_cong_cu: bool) -> dict[str, str]:
+    """Separate unknown judgments from measurements that do not apply."""
+    row = outcome.row
+    not_applicable = {
+        "recall": not row.answerable,
+        "neo_recall": not row.neo,
+        "context_recall": not row.answerable,
+        "context_precision": not row.answerable,
+        "claim_faithfulness": outcome.refused is True,
+        "answer_relevance": outcome.refused is True,
+        "required_claims_recall": not row.required_claims,
+        "forbidden_claims_rate": not row.forbidden_claims,
+    }
+    disabled = {"context_recall", "context_precision", "claim_faithfulness", "answer_relevance"}
+    return {
+        name: (
+            "measured"
+            if getattr(outcome, name) is not None
+            else "disabled"
+            if not ragas and name in disabled
+            else "not_applicable"
+            if not_applicable.get(name, False)
+            else "unknown"
+        )
+        for name in METRICS
+    }
+
+
+def evidence_metrics(
+    evidence: list[RetrievalEvidence] | None, expected_scope: str
+) -> tuple[float | None, float | None]:
+    if evidence is None:
+        return None, None
+    scope = (
+        (
+            sum(item.doc_scope not in {"chung", expected_scope} for item in evidence)
+            / len(evidence)
+            if evidence
+            else 0.0
+        )
+        if all(item.doc_scope is not None for item in evidence)
+        else None
+    )
+    version = (
+        (sum(item.is_latest is False for item in evidence) / len(evidence) if evidence else 0.0)
+        if all(
+            item.doc_id is not None and item.doc_version is not None and item.is_latest is not None
+            for item in evidence
+        )
+        else None
+    )
+    return scope, version
 
 
 def load_dataset(dataset: Path) -> list[Row]:
     if not dataset.exists():
         return []
     rows: list[Row] = []
-    for line in dataset.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        data: dict[str, Any] = json.loads(line)
+    records = load_and_validate(dataset)
+    raw = [
+        json.loads(line)
+        for line in dataset.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    for record, data in zip(records, raw, strict=True):
+        if record.scope != "chung":
+            # The live pipeline creates an isolated CLI thread per question.
+            # Do not silently test another namespace or touch production memory.
+            raise ValueError("scoped eval requires an isolated corpus/scope fixture")
         rows.append(
             Row(
-                id=str(data.get("id") or len(rows)),
-                question=data["question"],
-                answer=data.get("answer", ""),
-                expected_chunk_ids=[str(c) for c in data.get("expected_chunk_ids") or []],
-                loai=str(data.get("loai") or "khong_phan_loai"),
+                id=record.id,
+                question=record.question,
+                answer=record.expected_answer,
+                expected_chunk_ids=list(record.expected_chunk_ids),
+                loai=record.category,
                 ngon_ngu=str(data.get("ngon_ngu") or ""),
-                neo=tuple(str(n) for n in data.get("neo") or []),
+                neo=record.required_claims,
+                answerable=record.answerable,
+                scope=record.scope,
+                forbidden_claims=record.forbidden_claims,
+                required_claims=(record.required_claims if "required_claims" in data else ()),
             )
         )
     return rows
@@ -264,6 +363,9 @@ class _CongCuGhiLai:
         #: Van ban cong cu tra ve. DAY moi la "ngu canh" o che do nay: dung thu model
         #: nhin thay, khong phai mot ban ghep lai tu chunk.
         self.ket_qua: list[str] = []
+        self.evidence: list[RetrievalEvidence] = []
+        self.retrieval_observed = False
+        self.retrieval_unknown = False
 
     def specs(self) -> tuple[ToolDefinition, ...]:
         return self._that.specs()
@@ -275,6 +377,14 @@ class _CongCuGhiLai:
             self.goi.append((c.name, str(c.input.get("query") or "")))
         ket_qua = await self._that.call_many(calls, ctx)
         self.ket_qua.extend(r.content for r in ket_qua if r.ok)
+        for result in ket_qua:
+            if result.name != "search_knowledge_base":
+                continue
+            if not result.ok or result.evidence is None:
+                self.retrieval_unknown = True
+            else:
+                self.retrieval_observed = True
+                self.evidence.extend(result.evidence)
         return ket_qua
 
 
@@ -333,26 +443,38 @@ async def run_one_qua_cong_cu(row: Row, ragas: bool) -> Outcome:
         )
 
     faithfulness = await judge_faithfulness(row.question, answer, context, trace_id)
+    final = await judge_final_answer(answer, row.required_claims, row.forbidden_claims, trace_id)
 
     context_recall = context_precision = claim_faith = answer_rel = None
     if ragas:
-        if row.answer and row.loai != "ngoai_kho":
+        if row.answer and row.answerable:
             context_recall = await judge_context_recall(row.answer, context, trace_id)
         # Cat lai thanh tung ket qua cong cu: Context Precision cham theo TUNG DOAN,
         # va o day mot "doan" la mot lan goi cong cu.
-        if ghi.ket_qua and row.loai != "ngoai_kho":
-            context_precision = await judge_context_precision(
-                row.question, ghi.ket_qua, trace_id
+        if row.answerable:
+            context_precision = (
+                await judge_context_precision(row.question, ghi.ket_qua, trace_id)
+                if ghi.ket_qua
+                else 0.0
             )
-        claim_faith = await judge_claim_faithfulness(answer, context, trace_id)
-        answer_rel = await judge_answer_relevance(row.question, answer, trace_id)
+        if final.refused is not True:
+            claim_faith = await judge_claim_faithfulness(answer, context, trace_id)
+            answer_rel = await judge_answer_relevance(row.question, answer, trace_id)
+
+    evidence = ghi.evidence if ghi.retrieval_observed and not ghi.retrieval_unknown else None
+    scope_rate, version_rate = evidence_metrics(evidence, row.scope)
+    recall = (
+        recall_at_k(
+            list(dict.fromkeys(item.chunk_id for item in evidence)), row.expected_chunk_ids, K
+        )
+        if evidence is not None and row.answerable and row.expected_chunk_ids
+        else None
+    )
 
     return Outcome(
         row=row,
-        # Cong cu tra ve van ban da dinh dang, KHONG kem chunk_id — xem `_dinh_dang`
-        # trong tools/knowledge_search.py. Nen Recall@5 khong tinh duoc o che do nay,
-        # va `neo` la thu gach noi hai che do.
-        recall=None,
+        # First K unique chunks in tool-call/result order, from typed provenance.
+        recall=recall,
         faithfulness=faithfulness,
         neo_recall=neo_trong_ngu_canh(row.neo, context),
         context_recall=context_recall,
@@ -362,6 +484,11 @@ async def run_one_qua_cong_cu(row: Row, ragas: bool) -> Outcome:
         latency_ms=latency_ms,
         answer=answer,
         truy_van=tuple(q for _, q in ghi.goi if q),
+        refused=final.refused,
+        required_claims_recall=final.required_claims_recall,
+        forbidden_claims_rate=final.forbidden_claims_rate,
+        retrieval_scope_violation_rate=scope_rate,
+        retrieval_version_violation_rate=version_rate,
     )
 
 
@@ -396,32 +523,49 @@ async def run_one(row: Row, ragas: bool) -> Outcome:
     # qua trong rat giong mot phep do that.
     context = render_knowledge(tuple(chunks))
     faithfulness = await judge_faithfulness(row.question, result.text, context, trace_id)
+    final = await judge_final_answer(
+        result.text, row.required_claims, row.forbidden_claims, trace_id
+    )
 
-    # `expected_chunk_ids` rong co hai nghia khac han nhau, va gop lai la tu lua:
-    #   - cau `ngoai_kho`: KHONG CO chunk nao dung, 1,0 la dung.
-    #   - cau chua kip chu thich id: KHONG BIET, phai bo ra khoi trung binh.
+    # Retrieval recall does not apply to an unanswerable row. Missing annotation
+    # on an answerable row is unknown and fails the measured gate.
     if row.expected_chunk_ids:
         recall: float | None = recall_at_k([c.chunk_id for c in chunks], row.expected_chunk_ids, K)
-    elif row.loai == "ngoai_kho":
-        recall = 1.0
     else:
+        # No ground-truth relevant chunk means retrieval recall is undefined,
+        # not perfect. No-answer precision/recall requires separate judgments.
         recall = None
 
     context_recall = context_precision = claim_faith = answer_rel = None
     if ragas:
         # Cau `ngoai_kho` khong co y nao de truy trong dap an chuan.
-        if row.answer and row.loai != "ngoai_kho":
+        if row.answer and row.answerable:
             context_recall = await judge_context_recall(row.answer, context, trace_id)
         # Cau `ngoai_kho` KHONG co doan nao lien quan de ma xep dung thu tu — diem
         # thap o do la hanh vi DUNG, khong phai chat luong kem. Do that 11/09 sau khi
         # bat luat cung: nhom nay tut con 0,250 chi vi bot BAT DAU chiu di tra, tuc
         # chi so phat dung cai vua sua duoc.
-        if row.loai != "ngoai_kho":
-            context_precision = await judge_context_precision(
-                row.question, [c.content for c in chunks], trace_id
+        if row.answerable:
+            context_precision = (
+                await judge_context_precision(row.question, [c.content for c in chunks], trace_id)
+                if chunks
+                else 0.0
             )
-        claim_faith = await judge_claim_faithfulness(result.text, context, trace_id)
-        answer_rel = await judge_answer_relevance(row.question, result.text, trace_id)
+        if final.refused is not True:
+            claim_faith = await judge_claim_faithfulness(result.text, context, trace_id)
+            answer_rel = await judge_answer_relevance(row.question, result.text, trace_id)
+
+    evidence = [
+        RetrievalEvidence(
+            chunk_id=chunk.chunk_id,
+            doc_id=chunk.doc_id,
+            doc_version=chunk.doc_version,
+            doc_scope=chunk.doc_scope,
+            is_latest=chunk.is_latest,
+        )
+        for chunk in chunks
+    ]
+    scope_rate, version_rate = evidence_metrics(evidence, row.scope)
 
     return Outcome(
         row=row,
@@ -434,6 +578,11 @@ async def run_one(row: Row, ragas: bool) -> Outcome:
         answer_relevance=answer_rel,
         latency_ms=latency_ms,
         answer=result.text,
+        refused=final.refused,
+        required_claims_recall=final.required_claims_recall,
+        forbidden_claims_rate=final.forbidden_claims_rate,
+        retrieval_scope_violation_rate=scope_rate,
+        retrieval_version_violation_rate=version_rate,
     )
 
 
@@ -460,31 +609,101 @@ def trung_binh(xs: list[float | None]) -> tuple[float | None, int]:
 def _dong(ten: str, gia_tri: float | None, nguong: float, bo_qua: int, lon_hon: bool) -> bool:
     if gia_tri is None:
         print(f"  ----  {ten:<20}        —   (khong cau nao cham duoc)")
-        return True
+        return False
     dat = gia_tri > nguong if lon_hon else gia_tri < nguong
     ghi_chu = f"   (nguong {nguong}" + (f", bo qua {bo_qua}" if bo_qua else "") + ")"
     print(f"  {'DAT ' if dat else 'TRUOT'} {ten:<20} {gia_tri:>7.3f}{ghi_chu}")
     return dat
 
 
+def _metric_gate(
+    outcomes: list[Outcome],
+    name: str,
+    threshold: float,
+    ragas: bool,
+    qua_cong_cu: bool,
+    *,
+    at_most: bool = False,
+) -> bool:
+    states = [metric_states(outcome, ragas, qua_cong_cu)[name] for outcome in outcomes]
+    if "unknown" in states:
+        return False
+    values = [
+        float(getattr(outcome, name)) for outcome in outcomes if getattr(outcome, name) is not None
+    ]
+    if not values:
+        return bool(states) and all(state in {"not_applicable", "disabled"} for state in states)
+    mean = sum(values) / len(values)
+    return mean <= threshold if at_most else mean > threshold
+
+
+def measured_quality_gate(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool) -> bool:
+    if not outcomes:
+        return False
+    required = [("recall", RECALL_MIN), ("faithfulness", FAITHFULNESS_MIN)]
+    if ragas:
+        required += [
+            ("context_recall", CONTEXT_RECALL_MIN),
+            ("context_precision", CONTEXT_PRECISION_MIN),
+            ("claim_faithfulness", CLAIM_FAITHFULNESS_MIN),
+        ]
+    if not all(_metric_gate(outcomes, name, value, ragas, qua_cong_cu) for name, value in required):
+        return False
+    if any(
+        outcome.required_claims_recall != 1.0 for outcome in outcomes if outcome.row.required_claims
+    ) or any(
+        outcome.forbidden_claims_rate != 0.0 for outcome in outcomes if outcome.row.forbidden_claims
+    ):
+        return False
+    # Evidence violations always fail; absent metadata stays explicitly unknown
+    # and blocks release acceptance even when other measured gates pass.
+    if any(
+        value is not None and value != 0
+        for outcome in outcomes
+        for value in (
+            outcome.retrieval_scope_violation_rate,
+            outcome.retrieval_version_violation_rate,
+        )
+    ):
+        return False
+    no_answer = no_answer_summary(
+        [
+            {"answerable": outcome.row.answerable, "refused": outcome.refused}
+            for outcome in outcomes
+        ],
+        len(outcomes),
+    )
+    if no_answer["unknown"] or no_answer["false_positive"]:
+        return False
+    if no_answer["false_answer_rate"] is not None and (
+        no_answer["false_answer_rate"] > NO_ANSWER_FALSE_ANSWER_MAX
+    ):
+        return False
+    return (
+        percentile([float(outcome.latency_ms) for outcome in outcomes], 0.95) < LATENCY_P95_MAX_MS
+    )
+
+
 def report(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool = False) -> bool:
     """In bang chi so. True = dat het nguong."""
     # NOI RO dang do duong nao. Hai che do cho ra hai bo so KHONG so sanh duoc voi
     # nhau, va mot bang chi so khong ghi minh do cai gi la mot bang de bi doc nham.
-    duong = "TRO LY THAT (qua cong cu, model tu viet truy van)" if qua_cong_cu else (
-        "TANG TRUY HOI (cau hoi vao thang knowledge.search)"
+    duong = (
+        "TRO LY THAT (qua cong cu, model tu viet truy van)"
+        if qua_cong_cu
+        else ("TANG TRUY HOI (cau hoi vao thang knowledge.search)")
     )
     print(f"{len(outcomes)} cau  ·  do duong: {duong}" + chr(10))
 
+    if not outcomes:
+        return False
     recall, bo_recall = trung_binh([o.recall for o in outcomes])
-    faith = sum(o.faithfulness for o in outcomes) / len(outcomes)
+    faith, bo_faith = trung_binh([o.faithfulness for o in outcomes])
     p95 = percentile([float(o.latency_ms) for o in outcomes], 0.95)
 
-    dat = [
-        _dong("Recall@5", recall, RECALL_MIN, bo_recall, True),
-        _dong("Faithfulness", faith, FAITHFULNESS_MIN, 0, True),
-        _dong("Latency p95 (ms)", p95, float(LATENCY_P95_MAX_MS), 0, False),
-    ]
+    _dong("Recall@5", recall, RECALL_MIN, bo_recall, True)
+    _dong("Faithfulness", faith, FAITHFULNESS_MIN, bo_faith, True)
+    _dong("Latency p95 (ms)", p95, float(LATENCY_P95_MAX_MS), 0, False)
 
     neo_r, _ = trung_binh([o.neo_recall for o in outcomes])
     if neo_r is not None:
@@ -498,7 +717,7 @@ def report(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool = False) -> b
             ("Faithfulness (y)", [o.claim_faithfulness for o in outcomes], CLAIM_FAITHFULNESS_MIN),
         ):
             gia_tri, bo = trung_binh(xs)
-            dat.append(_dong(ten, gia_tri, nguong, bo, True))
+            _dong(ten, gia_tri, nguong, bo, True)
 
         rel, bo_rel = trung_binh([o.answer_relevance for o in outcomes])
         if rel is not None:
@@ -507,6 +726,22 @@ def report(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool = False) -> b
                 f"  ....  {'Answer Relevance':<20} {rel:>7.3f}   "
                 f"(tham khao, chua hieu chuan{ghi_chu})"
             )
+        missing_judgments = [
+            o
+            for o in outcomes
+            if (o.claim_faithfulness is None and o.refused is not True)
+            or (o.row.answerable and (o.context_recall is None or o.context_precision is None))
+        ]
+        if missing_judgments:
+            print(f"  TRUOT missing required RAGAS judgments: {len(missing_judgments)}")
+
+    no_answer = no_answer_summary(
+        [{"answerable": o.row.answerable, "refused": o.refused} for o in outcomes], len(outcomes)
+    )
+    print(f"  No-answer: {json.dumps(no_answer, sort_keys=True)}")
+    for name in ("required_claims_recall", "forbidden_claims_rate"):
+        value, missing = trung_binh([getattr(outcome, name) for outcome in outcomes])
+        print(f"  Final {name}: {value}; unmeasured/not-applicable={missing}")
 
     if qua_cong_cu:
         khong_goi = [o for o in outcomes if not o.truy_van]
@@ -518,16 +753,13 @@ def report(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool = False) -> b
             # KHONG goi cong cu lan nao la mot ket qua dang doc, khong phai cho trong:
             # do chinh la kieu hong da chiem 3/4 cau giao tap hop ngay 10/09.
             print(f"  KHONG goi cong cu ({len(khong_goi)}): {[o.row.id for o in khong_goi]}")
-        vi_du = [o for o in outcomes if o.truy_van][:3]
-        for o in vi_du:
-            print(f"    [{o.row.id}] {o.row.question[:34]:36} -> {o.truy_van[0][:52]!r}")
 
     _theo_loai(outcomes, ragas)
 
     kem = [
         o
         for o in outcomes
-        if o.faithfulness < FAITHFULNESS_MIN
+        if (o.faithfulness is not None and o.faithfulness < FAITHFULNESS_MIN)
         or (o.recall is not None and o.recall < RECALL_MIN)
         or (o.context_recall is not None and o.context_recall < CONTEXT_RECALL_MIN)
     ]
@@ -537,11 +769,18 @@ def report(outcomes: list[Outcome], ragas: bool, qua_cong_cu: bool = False) -> b
             r = "  —  " if o.recall is None else f"{o.recall:.2f}"
             cr = "  —  " if o.context_recall is None else f"{o.context_recall:.2f}"
             print(
-                f"  [{o.row.id}] {o.row.loai:<14} recall={r} ctx_recall={cr} "
-                f"faith={o.faithfulness:.2f}  {o.row.question[:46]}"
+                f"  [{o.row.id}] {o.row.loai:<14} recall={r} ctx_recall={cr} faith={o.faithfulness}"
             )
 
-    return all(dat)
+    categories: dict[str, list[Outcome]] = defaultdict(list)
+    for outcome in outcomes:
+        categories[outcome.row.loai].append(outcome)
+    category_pass = {
+        category: measured_quality_gate(items, ragas, qua_cong_cu)
+        for category, items in categories.items()
+    }
+    print(f"  Category measured gates: {json.dumps(category_pass, sort_keys=True)}")
+    return measured_quality_gate(outcomes, ragas, qua_cong_cu) and all(category_pass.values())
 
 
 def _theo_loai(outcomes: list[Outcome], ragas: bool) -> None:
@@ -561,7 +800,7 @@ def _theo_loai(outcomes: list[Outcome], ragas: bool) -> None:
     print(f"  {'loai':<16} {'n':>3}  {'faith':>6} {'ctx_rec':>8} {'ctx_prec':>9} {'neo':>6}")
     for loai in sorted(nhom):
         os_ = nhom[loai]
-        f = sum(o.faithfulness for o in os_) / len(os_)
+        f, _ = trung_binh([o.faithfulness for o in os_])
         cr, _ = trung_binh([o.context_recall for o in os_])
         cp, _ = trung_binh([o.context_precision for o in os_])
         neo, _ = trung_binh([o.neo_recall for o in os_])
@@ -570,22 +809,133 @@ def _theo_loai(outcomes: list[Outcome], ragas: bool) -> None:
             return "     —" if x is None else f"{x:>6.3f}"
 
         print(
-            f"  {loai:<16} {len(os_):>3}  {f:>6.3f} {s(cr):>8} {s(cp):>9} {s(neo):>6}"
+            f"  {loai:<16} {len(os_):>3}  {s(f)} {s(cr):>8} {s(cp):>9} {s(neo):>6}"
             if ragas
-            else f"  {loai:<16} {len(os_):>3}  {f:>6.3f} {'':>8} {'':>9} {s(neo):>6}"
+            else f"  {loai:<16} {len(os_):>3}  {s(f)} {'':>8} {'':>9} {s(neo):>6}"
         )
+
+
+def run_config(ragas: bool, qua_cong_cu: bool, split: str) -> dict[str, Any]:
+    settings = get_settings()
+    reply = MODELS["reply"]
+    judge = MODELS["summarize"]
+    return {
+        **source_identity(Path(__file__).resolve().parent.parent),
+        "split": split,
+        "ragas": ragas,
+        "pipeline": "tool" if qua_cong_cu else "retrieval",
+        "reply_model": reply.id,
+        "reply_max_tokens": reply.max_tokens,
+        "reply_effort": reply.effort,
+        "reply_endpoint_sha256": hashlib.sha256(
+            (reply.base_url or "default-openai").encode()
+        ).hexdigest(),
+        "judge_model": judge.id,
+        "judge_max_tokens": judge.max_tokens,
+        "judge_effort": judge.effort,
+        "judge_endpoint_sha256": hashlib.sha256(
+            (judge.base_url or "default-openai").encode()
+        ).hexdigest(),
+        "embedding_provider": settings.EMBEDDING_PROVIDER,
+        "embedding_model": settings.EMBEDDING_MODEL,
+        "embedding_dimensions": settings.EMBEDDING_DIM,
+        "rerank_provider": settings.RERANK_PROVIDER,
+        "rerank_model": settings.RERANK_MODEL,
+        "rerank_min_score": settings.RERANK_MIN_SCORE,
+        "rag_max_distance": settings.RAG_MAX_DISTANCE,
+        "top_k": K,
+        "metric_definition_version": 2,
+        "tool_recall_policy": "first_k_unique_evidence_in_call_order",
+        "thresholds": {
+            "recall": RECALL_MIN,
+            "faithfulness": FAITHFULNESS_MIN,
+            "context_recall": CONTEXT_RECALL_MIN,
+            "context_precision": CONTEXT_PRECISION_MIN,
+            "claim_faithfulness": CLAIM_FAITHFULNESS_MIN,
+            "latency_p95_ms": LATENCY_P95_MAX_MS,
+            "no_answer_false_answer_max": NO_ANSWER_FALSE_ANSWER_MAX,
+        },
+        "react_max_iterations": settings.REACT_MAX_ITERATIONS,
+        "react_deadline_ms": settings.REACT_DEADLINE_MS,
+    }
+
+
+def locked_config_hash(config: dict[str, Any]) -> str:
+    return config_hash(
+        {
+            key: value
+            for key, value in config.items()
+            if key not in {"commit", "worktree_dirty", "split"}
+        }
+    )
 
 
 async def main() -> int:
     _cho_phep_in_tieng_viet()
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    ragas = "--ragas" in sys.argv[1:]
-    qua_cong_cu = "--qua-cong-cu" in sys.argv[1:]
-    dataset = Path(args[0]) if args else DEFAULT_DATASET
+    parser = argparse.ArgumentParser(
+        description="Paid eval; development only unless test explicitly confirmed"
+    )
+    parser.add_argument("dataset", nargs="?", type=Path, default=DEFAULT_DATASET)
+    parser.add_argument("--ragas", action="store_true")
+    parser.add_argument("--qua-cong-cu", action="store_true")
+    parser.add_argument("--split", choices=("development", "test"), default="development")
+    parser.add_argument("--confirm-test", action="store_true")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--review-manifest", type=Path)
+    parser.add_argument("--print-config", action="store_true", help="Offline config and lock hash")
+    args = parser.parse_args()
+    dataset, ragas, qua_cong_cu = args.dataset, args.ragas, args.qua_cong_cu
+    config = run_config(ragas, qua_cong_cu, args.split)
+    if args.print_config:
+        print(
+            json.dumps({"config": config, "locked_eval_config_sha256": locked_config_hash(config)})
+        )
+        return EXIT_DAT
+    if args.split == "test" and not args.confirm_test:
+        print("Test split requires --confirm-test after configuration is locked.", file=sys.stderr)
+        return EXIT_TRUOT
+    if args.output and args.output.exists():
+        print("Artifact already exists; use a new path.", file=sys.stderr)
+        return EXIT_TRUOT
 
-    rows = load_dataset(dataset)
+    try:
+        dataset_hash = hashlib.sha256(dataset.read_bytes()).hexdigest()
+        rows = load_dataset(dataset)
+        all_records = load_and_validate(dataset)
+        review = check_review(
+            dataset,
+            all_records,
+            args.review_manifest,
+            locked_config_hash(config) if args.split == "test" else None,
+        )
+    except (ValueError, OSError) as error:
+        print(f"Dataset khong hop le: {error}", file=sys.stderr)
+        return EXIT_CHUA_CO_DU_LIEU if "placeholder" in str(error) else EXIT_TRUOT
     if not rows:
         print(f"Khong co cau nao trong {dataset}.", file=sys.stderr)
+        return EXIT_CHUA_CO_DU_LIEU
+
+    deficits = coverage_deficits(all_records)
+    readiness = {
+        "total": len(all_records),
+        "minimum_total": MINIMUM_TOTAL,
+        "coverage_deficits": deficits,
+        "annotation_deficits": annotation_deficits(all_records),
+        "review": review,
+        "ready": len(all_records) >= MINIMUM_TOTAL
+        and not deficits
+        and not annotation_deficits(all_records)
+        and review["attested"],
+    }
+    if args.split == "test" and not readiness["ready"]:
+        print(
+            "Test split requires complete coverage and reviewed, locked dataset.", file=sys.stderr
+        )
+        return EXIT_CHUA_CO_DU_LIEU
+
+    rows = [row for row in rows if split_for_id(row.id) == args.split]
+    if not rows:
+        print(f"No questions in {args.split} split.", file=sys.stderr)
         return EXIT_CHUA_CO_DU_LIEU
 
     if is_placeholder(rows):
@@ -599,6 +949,18 @@ async def main() -> int:
         return EXIT_CHUA_CO_DU_LIEU
 
     try:
+        selected_ids = {row.id for row in rows}
+        records = [record for record in load_and_validate(dataset) if record.id in selected_ids]
+        checked = await check_corpus(records)
+        if checked.exit_code:
+            print(
+                f"Corpus preflight rejected: {len(checked.issues)} metadata/annotation issues.",
+                file=sys.stderr,
+            )
+            return checked.exit_code
+        if hashlib.sha256(dataset.read_bytes()).hexdigest() != dataset_hash:
+            print("Dataset changed during preflight; no provider calls made.", file=sys.stderr)
+            return EXIT_TRUOT
         # Tuan tu, khong gather: chay song song lam so do do tre vo nghia, ma do tre
         # la mot trong cac nguong.
         #
@@ -614,20 +976,81 @@ async def main() -> int:
                 chay = run_one_qua_cong_cu if qua_cong_cu else run_one
                 outcomes.append(await chay(row, ragas))
             except Exception as error:
-                hong.append((row.id, f"{type(error).__name__}: {error}"))
-                _log.error("cau eval that bai, bo qua", cau=row.id, err=str(error))
+                hong.append((row.id, type(error).__name__))
+                _log.error("cau eval that bai, bo qua", cau=row.id, error_type=type(error).__name__)
 
-        if not outcomes:
-            print("Moi cau deu that bai — xem log.", file=sys.stderr)
-            return EXIT_TRUOT
-
-        dat = report(outcomes, ragas, qua_cong_cu)
+        dat = report(outcomes, ragas, qua_cong_cu) if outcomes else False
         if hong:
             print(chr(10) + f"KHONG CHAY DUOC {len(hong)}/{len(rows)} cau:")
             for cau, loi in hong:
                 print(f"  [{cau}] {loi}")
             print("  (su co ha tang, KHONG tinh vao cac chi so tren)")
-        return EXIT_DAT if dat else EXIT_TRUOT
+        try:
+            after = await corpus_fingerprint()
+        except Exception as error:
+            after = None
+            print(f"Final corpus metadata unavailable ({type(error).__name__}).", file=sys.stderr)
+        try:
+            dataset_stable = hashlib.sha256(dataset.read_bytes()).hexdigest() == dataset_hash
+        except OSError as error:
+            dataset_stable = False
+            print(f"Final dataset unavailable ({type(error).__name__}).", file=sys.stderr)
+        try:
+            source_stable = (
+                source_identity(Path(__file__).resolve().parent.parent)["source_sha256"]
+                == config["source_sha256"]
+            )
+        except Exception as error:
+            source_stable = False
+            print(f"Final source identity unavailable ({type(error).__name__}).", file=sys.stderr)
+        stable = checked.fingerprint == after and dataset_stable and source_stable
+        if not stable:
+            print(
+                "Dataset/corpus/source changed or could not be verified; run cannot pass.",
+                file=sys.stderr,
+            )
+        if args.output:
+            measurements = [
+                {
+                    "id": o.row.id,
+                    "category": o.row.loai,
+                    "latency_ms": o.latency_ms,
+                    "answerable": o.row.answerable,
+                    "refused": o.refused,
+                    "metric_states": metric_states(o, ragas, qua_cong_cu),
+                    **{name: getattr(o, name) for name in METRICS},
+                }
+                for o in outcomes
+            ]
+            artifact = build_artifact(
+                selected=[{"id": row.id, "category": row.loai} for row in rows],
+                outcomes=measurements,
+                failures=[{"id": key, "error_type": kind} for key, kind in hong],
+                dataset_sha256=dataset_hash,
+                corpus_before=checked.fingerprint,
+                corpus_after=after,
+                config=config,
+                measured_gate_passed=dat,
+                dataset_stable=dataset_stable,
+                source_stable=source_stable,
+                dataset_readiness=readiness,
+                category_gate_passed={
+                    category: measured_quality_gate(
+                        [outcome for outcome in outcomes if outcome.row.loai == category],
+                        ragas,
+                        qua_cong_cu,
+                    )
+                    and not any(
+                        row.loai == category and row.id in {key for key, _ in hong} for row in rows
+                    )
+                    for category in {row.loai for row in rows}
+                },
+            )
+            write_artifact(args.output, artifact)
+        return EXIT_DAT if dat and not hong and stable else EXIT_TRUOT
+    except Exception as error:
+        print(f"Eval failed ({type(error).__name__}).", file=sys.stderr)
+        return EXIT_TRUOT
     finally:
         await close_db()
         await close_redis()

@@ -8,6 +8,11 @@ khong con code, bien cau hinh hay gia tri `Platform` nao cho no.
 
 ## Tai lieu
 
+Trạng thái thực thi hiện tại (15/10/2026): [báo cáo](docs/execution-2026-10-15.md),
+[status](docs/status.md), [runbook](docs/runbook.md), [evaluation](docs/evaluation.md).
+Gate A/B/C chưa được nghiệm thu. Kết quả test local không thay thế review dữ liệu,
+SSO/proxy, thông báo on-call, restore production hoặc soak Zalo thật.
+
 | File | Noi dung |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **Doc truoc.** Code nam o dau, ai duoc goi ai, schema DB, chi phi. |
@@ -21,7 +26,7 @@ khong con code, bien cau hinh hay gia tri `Platform` nao cho no.
 ```bash
 uv sync                                    # phu thuoc da ghim trong uv.lock
 cp .env.example .env                       # dien OPENAI_API_KEY va DAILY_BUDGET_USD
-docker compose -f ops/docker-compose.yml up -d postgres redis
+docker compose --env-file .env -f ops/docker-compose.yml -f ops/docker-compose.dev.yml up -d postgres redis
 uv run python -m main.cli migrate
 uv run python -m main.cli                  # REPL: chat qua terminal, chua can token nao
 ```
@@ -36,6 +41,11 @@ uv run python -m main.zalo                 # tuy chon: long-poll Zalo Bot
 
 Giao dien do chinh process `api` render (Jinja2 + JavaScript thuan). **Khong co buoc
 build, khong can Node** — sua giao dien xong thi tai lai trang.
+
+Luồng trên dành cho development: đặt `NODE_ENV=development`, `WEB_AUTH_MODE=dev`,
+`WEB_BIND=127.0.0.1`, điền `POSTGRES_PASSWORD` và DSN native khớp nhau. Base Compose
+không publish PostgreSQL/Redis; chỉ override dev mở port loopback. Container production
+dùng profile `app`, DSN `CONTAINER_DATABASE_URL` và proxy OIDC ký request v2 theo runbook.
 
 ## Lenh
 
@@ -52,7 +62,11 @@ build, khong can Node** — sua giao dien xong thi tai lai trang.
 | `uv run python -m main.cli ingest <tep>` | Nap tai lieu vao RAG (chi admin) |
 | `uv run python -m main.cli stats [ngay]` | Tien di dau, cham o dau, cache co an khong |
 | `uv run python -m main.cli review <nen-tang> <thread>` | Duyet SAU fact bot tu ghi (L3 implicit) |
-| `uv run pytest` | unit test (khong can I/O) |
+| `uv run pytest tests/unit` | Unit test với fake; không chứng minh chất lượng semantic |
+| `uv run pytest` | Toàn suite; integration cần PostgreSQL/Redis, một số test cần embedding thật |
+| `uv run python -m main.cli embeddings inspect` | Metadata/provenance vector; không gọi model |
+| `uv run python -m main.cli owners inspect` | Snapshot metadata thread Web legacy; không suy đoán owner |
+| `uv run python -m main.cli memory-embeddings inspect <platform> <thread>` | Snapshot fact; rebuild có manifest, mặc định dry-run; xem runbook |
 | `uv run lint-imports` | **Cuong che luat kien truc. Bat buoc trong CI.** |
 | `uv run python ops/guard_env.py` | **Chan doc env ngoai `config/`. Bat buoc trong CI.** |
 | `uv run python ops/guard_sql.py` | **Chan SQL cham `memory_fact` ngoai `memory/repository/`. Bat buoc trong CI.** |
@@ -83,6 +97,11 @@ uv run python -m main.cli ingest tai-lieu/so-tay.md "So tay nhan vien 2026"
 Nhan `.txt` `.md` `.pdf` `.docx`. Nap lai cung mot tep khong doi thi khong lam gi;
 noi dung doi thi len **phien ban moi** chu khong sua ban cu — mot cau tra loi da
 trich dan chunk cu thi chunk do phai con nguyen van.
+
+Checksum chỉ được bỏ qua khi cả embedding identity cũng khớp. Đổi model/provider
+phải re-ingest rõ ràng bằng `--ep`; cùng 1024 chiều chưa đủ để so sánh vector. Document
+và fact legacy chưa biết provenance giữ trạng thái unknown; truy vấn semantic từ chối
+trước khi so sánh, còn audit/xoá vẫn dùng được. Không attest identity từ kết quả Recall.
 
 Nap tai lieu **dau tien** xong phai khoi dong lai worker: cong cu
 `search_knowledge_base` chi duoc khai bao khi kho tai lieu co gi.
@@ -120,13 +139,18 @@ uv run python -m main.cli stats 7      # doc thang tu usage_log, khong can dung 
 curl http://127.0.0.1:3000/api/metrics # dinh dang Prometheus, cho Grafana
 
 # Grafana + Prometheus, cam san datasource va dashboard:
-docker compose -f ops/docker-compose.yml --profile monitoring up -d
+docker compose --env-file .env -f ops/docker-compose.yml --profile app --profile monitoring up -d
 #   Grafana    http://127.0.0.1:3001
 #   Prometheus http://127.0.0.1:9090
 ```
 
 `cli stats` tra loi ba cau: tien di dau, route nao cham, va prompt caching co dang
 an khong. Ti le cache tut ve 0 nghia la tien to on dinh cua prompt da vo.
+
+Monitoring cần metrics token và mật khẩu Grafana theo runbook; `/api/metrics` được
+bảo vệ bằng credential riêng. Muốn gửi cảnh báo phải thêm profile `alerts` và webhook
+Alertmanager do operator quản lý. Bộ 14 rule có cảnh báo budget 70%/90%; ngân sách
+được kiểm tra giữa các lời gọi, chưa có reservation để bảo đảm trần chi tiêu tuyệt đối.
 
 ## Ghi cong du lieu ben thu ba
 

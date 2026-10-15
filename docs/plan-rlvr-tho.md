@@ -1,5 +1,10 @@
 # RLVR cho thơ luật — verifier làm hàm thưởng, huấn luyện bằng GRPO
 
+> **Tài liệu lịch sử — đã bị thay thế làm nguồn trạng thái vận hành (04/10/2026).**
+> Kế hoạch hiện hành: [Execute 02/10](Execute_02_10.md).
+> Kết quả đã kiểm chứng: [status](status.md), [execution report](execution-report.md).
+> Giữ nguyên quyết định/số đo lịch sử bên dưới; banner này không xác nhận mọi hạng mục đã hoàn thành.
+
 > Ngày lập: 14/09/2026. Trạng thái: **bước 1-5 xong** (§9). Bước 6-7 đã có script,
 > chờ GPU để chạy.
 >
